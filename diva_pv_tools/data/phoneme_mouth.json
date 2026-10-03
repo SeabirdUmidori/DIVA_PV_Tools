@@ -1,0 +1,11 @@
+{
+ "_source": {
+  "scripts": 1065,
+  "distinct_performances": 265,
+  "time_unit": "TIME is in units of 1/100000 s"
+ },
+ "_status": "UNAVAILABLE",
+ "_reason": "The scripts carry no lyric text: LYRIC holds only the character *index* within the line, and no lyric string, kana table or song text exists anywhere in the shipped rom data (searched: script, 2d, pv_expression and tables directories). P(mouth | phoneme) therefore cannot be measured from this data set, and a hand-written kana table would be exactly the guess this solver must not make.",
+ "_what_would_unblock_it": "a lyric text source, or a vocal stem plus forced alignment; the solver already accepts an external phoneme timeline through `evidence.phonemes` so neither requires touching the solver.",
+ "phoneme_mouth": {}
+}

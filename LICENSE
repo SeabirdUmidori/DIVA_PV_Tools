@@ -1,6 +1,7 @@
 MIT License
 
-Copyright (c) 2024 ThisIsHH
+Copyright (c) 2026 SeabirdUmidori (diva_pv_tools fork)
+Copyright (c) 2024 ThisIsHH (original BlenderDivaTools, https://github.com/ThisIsHH/BlenderDivaTools)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +20,14 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+This repository additionally bundles:
+
+- `template/MMD to DIVA (A-POSE)_fork.blend` - rig work by FlyingSpirits within the
+  BlenderDivaTools project (MIT, (c) 2024 ThisIsHH), carried and fixed forward by the fork.
+- Format knowledge derived from studies of korenkonder/PD_Tool (mot set / a3da / pv_db
+  command tables) and ThisIsHH's DIVA_BlenderCameraTool (MIT, (c) 2023 ThisIsHH).
+- Statistics tables (`data/*.json`) measured from Project DIVA MEGA39's+ game data.
+  The game itself is (c) SEGA; no game assets are included or redistributed here.

@@ -1,0 +1,21 @@
+{
+ "_source": {
+  "scripts": 1065,
+  "distinct_performances": 265,
+  "time_unit": "TIME is in units of 1/100000 s"
+ },
+ "performances_with_set_motion": 226,
+ "set_motion_gap_s": {
+  "n": 9885,
+  "min": 0.01666,
+  "p10": 0.43333,
+  "p50": 1.63334,
+  "p90": 6.36363,
+  "max": 183.06666,
+  "mean": 3.20132
+ },
+ "expression_events": 8967,
+ "expression_within_1s_of_a_motion_change": 3351,
+ "coincidence_rate": 0.3737,
+ "_caveat": "SET_MOTION names a motion and a blend, it does not carry the pose curve, so this measures *change coincidence* and not correlation with motion intensity. It is reported as a weak context prior only."
+}

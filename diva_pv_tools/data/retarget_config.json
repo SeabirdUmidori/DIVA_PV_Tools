@@ -1,0 +1,32 @@
+{
+ "_measured_basis": "w_vector is the MMD evidence. It is the only term that can override a prior, which is why it is the largest: the calibrated priors may re-rank two candidates the MMD cannot separate, but they may not overrule a morph that is plainly raised.  w_phoneme is the weight on an externally supplied phoneme or lyric-viseme timeline. It is 0 when no timeline is supplied, so the default is free; nothing in the current pipeline produces one, which is why phoneme_mouth.json is marked UNAVAILABLE.  max_events_per_sec is 0, which means the ceiling comes from the corpus's own p90 event rate in mouth_prototypes.json (5.27 cues/s over 246 performances) rather than from a constant.  It was 9.0, nearly twice the corpus p90; because the merge stage applied it as a per-event floor regardless of the overall rate, it collapsed 72% of a real performance's events and left median events 0.37 s long against a corpus median gap of 0.198 s.  That over-merging, not too many cues, is what produced the held small mouth shape.",
+ "_note": "Calibration for face_retarget. Change these instead of the code: the solver reads this file at run time and every value here has a measured counterpart in the sibling *.json files, which were measured from the shipping scripts.",
+ "solver": {
+  "expression": true,
+  "expression_min_hold_s": 0.25,
+  "floor": 0.12,
+  "key_rate_hz": 0.0,
+  "max_events_per_sec": 0.0,
+  "min_event_s": 0.06,
+  "natural_variation": {
+   "audio_prior_weight": 0.0,
+   "diversity_weight": 0.0,
+   "enabled": true,
+   "max_same_shape_duration_quantile": 0.9,
+   "max_same_viseme_duration_quantile": 0.9,
+   "same_shape_penalty": 0.0,
+   "strength": 1.0
+  },
+  "seed": 20240917,
+  "weight_scale": 1.0
+ },
+ "weights": {
+  "w_curve": 0.35,
+  "w_duration": 0.3,
+  "w_lyric": 0.0,
+  "w_phoneme": 1.6,
+  "w_transition": 0.55,
+  "w_variant": 0.25,
+  "w_vector": 1.0
+ }
+}

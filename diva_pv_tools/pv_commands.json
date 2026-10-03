@@ -1,0 +1,751 @@
+[
+ {
+  "id": 0,
+  "pmin": 0,
+  "pmax": 0,
+  "flag": 1,
+  "name": "END"
+ },
+ {
+  "id": 1,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "TIME"
+ },
+ {
+  "id": 2,
+  "pmin": 3,
+  "pmax": 4,
+  "flag": 1,
+  "name": "MIKU_MOVE"
+ },
+ {
+  "id": 3,
+  "pmin": 1,
+  "pmax": 2,
+  "flag": 1,
+  "name": "MIKU_ROT"
+ },
+ {
+  "id": 4,
+  "pmin": 1,
+  "pmax": 2,
+  "flag": 1,
+  "name": "MIKU_DISP"
+ },
+ {
+  "id": 5,
+  "pmin": 1,
+  "pmax": 2,
+  "flag": 1,
+  "name": "MIKU_SHADOW"
+ },
+ {
+  "id": 6,
+  "pmin": 7,
+  "pmax": 7,
+  "flag": 1,
+  "name": "TARGET"
+ },
+ {
+  "id": 7,
+  "pmin": 3,
+  "pmax": 4,
+  "flag": 1,
+  "name": "SET_MOTION"
+ },
+ {
+  "id": 8,
+  "pmin": 1,
+  "pmax": 2,
+  "flag": 1,
+  "name": "SET_PLAYDATA"
+ },
+ {
+  "id": 9,
+  "pmin": 5,
+  "pmax": 6,
+  "flag": 1,
+  "name": "EFFECT"
+ },
+ {
+  "id": 10,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "FADEIN_FIELD"
+ },
+ {
+  "id": 11,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "EFFECT_OFF"
+ },
+ {
+  "id": 12,
+  "pmin": 6,
+  "pmax": 6,
+  "flag": 1,
+  "name": "SET_CAMERA"
+ },
+ {
+  "id": 13,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "DATA_CAMERA"
+ },
+ {
+  "id": 14,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "CHANGE_FIELD"
+ },
+ {
+  "id": 15,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "HIDE_FIELD"
+ },
+ {
+  "id": 16,
+  "pmin": 3,
+  "pmax": 3,
+  "flag": 1,
+  "name": "MOVE_FIELD"
+ },
+ {
+  "id": 17,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "FADEOUT_FIELD"
+ },
+ {
+  "id": 18,
+  "pmin": 2,
+  "pmax": 3,
+  "flag": 1,
+  "name": "EYE_ANIM"
+ },
+ {
+  "id": 19,
+  "pmin": 3,
+  "pmax": 5,
+  "flag": 1,
+  "name": "MOUTH_ANIM"
+ },
+ {
+  "id": 20,
+  "pmin": 4,
+  "pmax": 5,
+  "flag": 1,
+  "name": "HAND_ANIM"
+ },
+ {
+  "id": 21,
+  "pmin": 3,
+  "pmax": 4,
+  "flag": 1,
+  "name": "LOOK_ANIM"
+ },
+ {
+  "id": 22,
+  "pmin": 3,
+  "pmax": 4,
+  "flag": 1,
+  "name": "EXPRESSION"
+ },
+ {
+  "id": 23,
+  "pmin": 4,
+  "pmax": 5,
+  "flag": 1,
+  "name": "LOOK_CAMERA"
+ },
+ {
+  "id": 24,
+  "pmin": 1,
+  "pmax": 2,
+  "flag": 1,
+  "name": "LYRIC"
+ },
+ {
+  "id": 25,
+  "pmin": 0,
+  "pmax": 0,
+  "flag": 1,
+  "name": "MUSIC_PLAY"
+ },
+ {
+  "id": 26,
+  "pmin": 1,
+  "pmax": 2,
+  "flag": 1,
+  "name": "MODE_SELECT"
+ },
+ {
+  "id": 27,
+  "pmin": 2,
+  "pmax": 4,
+  "flag": 1,
+  "name": "EDIT_MOTION"
+ },
+ {
+  "id": 28,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "BAR_TIME_SET"
+ },
+ {
+  "id": 29,
+  "pmin": 1,
+  "pmax": 2,
+  "flag": 1,
+  "name": "SHADOWHEIGHT"
+ },
+ {
+  "id": 30,
+  "pmin": 2,
+  "pmax": 1,
+  "flag": 1,
+  "name": "EDIT_FACE"
+ },
+ {
+  "id": 31,
+  "pmin": 19,
+  "pmax": 21,
+  "flag": 1,
+  "name": "MOVE_CAMERA"
+ },
+ {
+  "id": 32,
+  "pmin": 0,
+  "pmax": 0,
+  "flag": 1,
+  "name": "PV_END"
+ },
+ {
+  "id": 33,
+  "pmin": 2,
+  "pmax": 3,
+  "flag": 1,
+  "name": "SHADOWPOS"
+ },
+ {
+  "id": 34,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "EDIT_LYRIC"
+ },
+ {
+  "id": 35,
+  "pmin": 5,
+  "pmax": 5,
+  "flag": 1,
+  "name": "EDIT_TARGET"
+ },
+ {
+  "id": 36,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "EDIT_MOUTH"
+ },
+ {
+  "id": 37,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "SET_CHARA"
+ },
+ {
+  "id": 38,
+  "pmin": 7,
+  "pmax": 7,
+  "flag": 1,
+  "name": "EDIT_MOVE"
+ },
+ {
+  "id": 39,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "EDIT_SHADOW"
+ },
+ {
+  "id": 40,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "EDIT_EYELID"
+ },
+ {
+  "id": 41,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "EDIT_EYE"
+ },
+ {
+  "id": 42,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "EDIT_ITEM"
+ },
+ {
+  "id": 43,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "EDIT_EFFECT"
+ },
+ {
+  "id": 44,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "EDIT_DISP"
+ },
+ {
+  "id": 45,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "EDIT_HAND_ANIM"
+ },
+ {
+  "id": 46,
+  "pmin": 3,
+  "pmax": 3,
+  "flag": 1,
+  "name": "AIM"
+ },
+ {
+  "id": 47,
+  "pmin": 3,
+  "pmax": 3,
+  "flag": 1,
+  "name": "HAND_ITEM"
+ },
+ {
+  "id": 48,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "EDIT_BLUSH"
+ },
+ {
+  "id": 49,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "NEAR_CLIP"
+ },
+ {
+  "id": 50,
+  "pmin": 1,
+  "pmax": 2,
+  "flag": 1,
+  "name": "CLOTH_WET"
+ },
+ {
+  "id": 51,
+  "pmin": 3,
+  "pmax": 3,
+  "flag": 1,
+  "name": "LIGHT_ROT"
+ },
+ {
+  "id": 52,
+  "pmin": 6,
+  "pmax": 6,
+  "flag": 1,
+  "name": "SCENE_FADE"
+ },
+ {
+  "id": 53,
+  "pmin": 6,
+  "pmax": 6,
+  "flag": 1,
+  "name": "TONE_TRANS"
+ },
+ {
+  "id": 54,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "SATURATE"
+ },
+ {
+  "id": 55,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "FADE_MODE"
+ },
+ {
+  "id": 56,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "AUTO_BLINK"
+ },
+ {
+  "id": 57,
+  "pmin": 3,
+  "pmax": 3,
+  "flag": 1,
+  "name": "PARTS_DISP"
+ },
+ {
+  "id": 58,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "TARGET_FLYING_TIME"
+ },
+ {
+  "id": 59,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "CHARA_SIZE"
+ },
+ {
+  "id": 60,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "CHARA_HEIGHT_ADJUST"
+ },
+ {
+  "id": 61,
+  "pmin": 4,
+  "pmax": 4,
+  "flag": 1,
+  "name": "ITEM_ANIM"
+ },
+ {
+  "id": 62,
+  "pmin": 4,
+  "pmax": 4,
+  "flag": 1,
+  "name": "CHARA_POS_ADJUST"
+ },
+ {
+  "id": 63,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "SCENE_ROT"
+ },
+ {
+  "id": 64,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "MOT_SMOOTH"
+ },
+ {
+  "id": 65,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "PV_BRANCH_MODE"
+ },
+ {
+  "id": 66,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "DATA_CAMERA_START"
+ },
+ {
+  "id": 67,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "MOVIE_PLAY"
+ },
+ {
+  "id": 68,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "MOVIE_DISP"
+ },
+ {
+  "id": 69,
+  "pmin": 3,
+  "pmax": 3,
+  "flag": 1,
+  "name": "WIND"
+ },
+ {
+  "id": 70,
+  "pmin": 3,
+  "pmax": 3,
+  "flag": 1,
+  "name": "OSAGE_STEP"
+ },
+ {
+  "id": 71,
+  "pmin": 3,
+  "pmax": 3,
+  "flag": 1,
+  "name": "OSAGE_MV_CCL"
+ },
+ {
+  "id": 72,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "CHARA_COLOR"
+ },
+ {
+  "id": 73,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "SE_EFFECT"
+ },
+ {
+  "id": 74,
+  "pmin": 9,
+  "pmax": 9,
+  "flag": 1,
+  "name": "EDIT_MOVE_XYZ"
+ },
+ {
+  "id": 75,
+  "pmin": 3,
+  "pmax": 3,
+  "flag": 1,
+  "name": "EDIT_EYELID_ANIM"
+ },
+ {
+  "id": 76,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "EDIT_INSTRUMENT_ITEM"
+ },
+ {
+  "id": 77,
+  "pmin": 4,
+  "pmax": 4,
+  "flag": 1,
+  "name": "EDIT_MOTION_LOOP"
+ },
+ {
+  "id": 78,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "EDIT_EXPRESSION"
+ },
+ {
+  "id": 79,
+  "pmin": 3,
+  "pmax": 3,
+  "flag": 1,
+  "name": "EDIT_EYE_ANIM"
+ },
+ {
+  "id": 80,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "EDIT_MOUTH_ANIM"
+ },
+ {
+  "id": 81,
+  "pmin": 24,
+  "pmax": 24,
+  "flag": 1,
+  "name": "EDIT_CAMERA"
+ },
+ {
+  "id": 82,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "EDIT_MODE_SELECT"
+ },
+ {
+  "id": 83,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "PV_END_FADEOUT"
+ },
+ {
+  "id": 84,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "TARGET_FLAG"
+ },
+ {
+  "id": 85,
+  "pmin": 3,
+  "pmax": 3,
+  "flag": 1,
+  "name": "ITEM_ANIM_ATTACH"
+ },
+ {
+  "id": 86,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "SHADOW_RANGE"
+ },
+ {
+  "id": 87,
+  "pmin": 3,
+  "pmax": 3,
+  "flag": 1,
+  "name": "HAND_SCALE"
+ },
+ {
+  "id": 88,
+  "pmin": 4,
+  "pmax": 4,
+  "flag": 1,
+  "name": "LIGHT_POS"
+ },
+ {
+  "id": 89,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "FACE_TYPE"
+ },
+ {
+  "id": 90,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "SHADOW_CAST"
+ },
+ {
+  "id": 91,
+  "pmin": 6,
+  "pmax": 6,
+  "flag": 1,
+  "name": "EDIT_MOTION_F"
+ },
+ {
+  "id": 92,
+  "pmin": 3,
+  "pmax": 3,
+  "flag": 1,
+  "name": "FOG"
+ },
+ {
+  "id": 93,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "BLOOM"
+ },
+ {
+  "id": 94,
+  "pmin": 3,
+  "pmax": 3,
+  "flag": 1,
+  "name": "COLOR_COLLE"
+ },
+ {
+  "id": 95,
+  "pmin": 3,
+  "pmax": 3,
+  "flag": 1,
+  "name": "DOF"
+ },
+ {
+  "id": 96,
+  "pmin": 4,
+  "pmax": 4,
+  "flag": 1,
+  "name": "CHARA_ALPHA"
+ },
+ {
+  "id": 97,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "AOTO_CAP"
+ },
+ {
+  "id": 98,
+  "pmin": 1,
+  "pmax": 1,
+  "flag": 1,
+  "name": "MAN_CAP"
+ },
+ {
+  "id": 99,
+  "pmin": 3,
+  "pmax": 3,
+  "flag": 1,
+  "name": "TOON"
+ },
+ {
+  "id": 100,
+  "pmin": 3,
+  "pmax": 3,
+  "flag": 1,
+  "name": "SHIMMER"
+ },
+ {
+  "id": 101,
+  "pmin": 4,
+  "pmax": 4,
+  "flag": 1,
+  "name": "ITEM_ALPHA"
+ },
+ {
+  "id": 102,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "MOVIE_CUT_CHG"
+ },
+ {
+  "id": 103,
+  "pmin": 3,
+  "pmax": 3,
+  "flag": 1,
+  "name": "CHARA_LIGHT"
+ },
+ {
+  "id": 104,
+  "pmin": 3,
+  "pmax": 3,
+  "flag": 1,
+  "name": "STAGE_LIGHT"
+ },
+ {
+  "id": 105,
+  "pmin": 8,
+  "pmax": 8,
+  "flag": 1,
+  "name": "AGEAGE_CTRL"
+ },
+ {
+  "id": 106,
+  "pmin": 2,
+  "pmax": 2,
+  "flag": 1,
+  "name": "PSE"
+ }
+]
