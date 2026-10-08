@@ -59,7 +59,7 @@ class CameraError(Exception):
 
 
 # ------------------------------------------------------------------ shared: read + sample once
-def _samples(vmd_path, source_fps, scale, min_y, layout="auto", band=FOV_BAND):
+def _samples(vmd_path, source_fps, scale, min_y, layout="auto", band=FOV_BAND, y_offset=0.0):
     """(keys, info, rows, size) for one VMD, with the source rate and floor applied.
 
     cam_json reads the module-level SRC_FPS / FRAME_STEP for its 30->60 doubling, so a
@@ -77,7 +77,8 @@ def _samples(vmd_path, source_fps, scale, min_y, layout="auto", band=FOV_BAND):
         cam_json.FRAME_STEP = max(1, int(round(DST_FPS / float(source_fps))))
     try:
         keys, info = cam_json.read_camera(vmd_path, layout)
-        rows, size = cam_json.sample_streams(keys, info, unit=scale, band=band, min_y=min_y)
+        rows, size = cam_json.sample_streams(keys, info, unit=scale, band=band, min_y=min_y,
+                                             y_offset=y_offset)
     except ValueError as exc:                                # cam_json raises ValueError, not ours
         raise CameraError(str(exc))
     finally:
@@ -157,7 +158,7 @@ def _build_a3da(rows, size, file_name, base_a3da=None):
 
 
 def export_camera_a3da(vmd_path, out_a3da_path, *, file_name=None, base_a3da=None,
-                       fps=None, scale=cam_json.UNIT, min_y=None, cancel=None):
+                       fps=None, scale=cam_json.UNIT, min_y=None, y_offset=0.0, cancel=None):
     """Convert VMD -> a3da directly (the form the panel exports; no FArC wrapper).
 
     ``file_name`` is the name written into the a3da's own ``_.file_name`` property, which is what the
@@ -170,7 +171,7 @@ def export_camera_a3da(vmd_path, out_a3da_path, *, file_name=None, base_a3da=Non
     step: a cancel in the middle of a conversion costs the work already done, but it must not cost
     the file the user already had.  The temp name is removed either way.
     """
-    keys, info, rows, size = _samples(vmd_path, fps, scale, min_y)
+    keys, info, rows, size = _samples(vmd_path, fps, scale, min_y, y_offset=y_offset)
     if file_name is None:
         file_name = os.path.splitext(os.path.basename(vmd_path))[0] + ".a3da"
     got, built = _build_a3da(rows, size, file_name, base_a3da)

@@ -344,7 +344,12 @@
   "33": "MIK_KUCHI_CHU_OLD",
   "39": "MIK_KUCHI_PSP_NIYARI",
   "41": "MIK_KUCHI_SANKAKU",
-  "42": "MIK_KUCHI_SHIKAKU"
+  "42": "MIK_KUCHI_SHIKAKU",
+  "9": "UNNAMED_MOUTH_9",
+  "34": "MIK_KUCHI_PSP_A",
+  "35": "MIK_KUCHI_PSP_E",
+  "36": "MIK_KUCHI_PSP_O",
+  "38": "MIK_KUCHI_PSP_NIYA"
  },
  "expression_id_names": {
   "7": "MIK_FACE_RESET",
@@ -392,7 +397,18 @@
   "70": "MIK_FACE_KIRI_CL",
   "71": "MIK_FACE_KIRI_OLD",
   "72": "MIK_FACE_KIRI_OLD_CL",
-  "73": "MIK_FACE_UTURO"
+  "73": "MIK_FACE_UTURO",
+  "0": "CMN_MRA00_13_01",
+  "1": "UNNAMED_EXPRESSION_1",
+  "2": "UNNAMED_EXPRESSION_2",
+  "3": "UNNAMED_EXPRESSION_3",
+  "4": "UNNAMED_EXPRESSION_4",
+  "5": "UNNAMED_EXPRESSION_5",
+  "6": "UNNAMED_EXPRESSION_6",
+  "18": "UNNAMED_EXPRESSION_18",
+  "60": "UNNAMED_EXPRESSION_60",
+  "62": "UNNAMED_EXPRESSION_62",
+  "63": "UNNAMED_EXPRESSION_63"
  },
  "expression_notes": {
   "MIK_FACE_LAUGH": "open smile, the single most used expression in the shipping scripts",
@@ -514,5 +530,42 @@
    ]
   }
  },
- "_rule": "A target may only be emitted when it is in mouth_shapes / expression_ids.  Those two lists are the only evidence that the engine accepts a value; a name that merely looks right is not."
+ "_rule": "A target may only be emitted when it is in mouth_shapes / expression_ids.  Those two lists are the only evidence that the engine accepts a value; a name that merely looks right is not.",
+ "_provenance": {
+  "measured_from": "an extracted game rom",
+  "scripts_seen": 1097,
+  "scripts_decoded": 1097,
+  "mouth_shapes_attested": 41,
+  "expression_ids_attested": 57,
+  "repaired": {
+   "mouth_shapes_added": [
+    9,
+    34,
+    35,
+    36,
+    38
+   ],
+   "expression_ids_added": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    18,
+    60,
+    62,
+    63
+   ],
+   "devices": [
+    "?",
+    "MIK_KUCHI_PSP_A",
+    "MIK_KUCHI_PSP_E",
+    "MIK_KUCHI_PSP_NIYA",
+    "MIK_KUCHI_PSP_O"
+   ]
+  },
+  "note": "mouth_shape_names are indices into the game's own mouth block; expression_id_names are rob_mot_tbl slots. Both were re-derived from every shipping script available, because the exporter refuses any value not listed here and an omission silently blocks a value the game itself sends."
+ }
 }

@@ -3,13 +3,19 @@
 **A Blender add-on that turns MMD work into Project DIVA MEGA39's+ mod files** — the dance,
 the camera, the song and the face. Import a `.vmd` motion, tune it on a provided rig template,
 and export what the game's mod loader reads: a **mot set** (`.bin`), a **camera** (`.a3da`), a
-**song** (`.ogg`) and **face cues** spliced into a PV script (`.dsc`).
+**song** (`.ogg`), **face cues** spliced into a PV script (`.dsc`) and the **eye-motion file**
+(`pv_expression/exp_PV<id>.bin`) that script switches on.
 
 It is a fork of [BlenderDivaTools](https://github.com/ThisIsHH/BlenderDivaTools)
-(`DIVA Tools`, by **ThisIsHH** and **FlyingSpirits**, MIT); this branch keeps its motion-export
-core and grows the project into a four-way converter with a cancellable task system and a
-bilingual (English/中文) UI. See [Provenance](#provenance--what-is-inherited-what-is-new) for
-the exact split.
+(`DIVA Tools`, by **ThisIsHH** and **FlyingSpirits**, MIT), maintained as **diva_pv_tools** by
+**SeabirdUmidori (fork)**; this branch keeps its motion-export core and grows the project into a
+converter with a cancellable task system and a bilingual (English/中文) UI. See
+[Provenance](#provenance--what-is-inherited-what-is-new) for the exact split.
+
+> **Version 2.0.0** is the first release of this fork as a converter, and the one that grew the face
+> into a subsystem of its own: a solved mouth, a rule-driven expression transplant, the eyelid from
+> the dance's own `まばたき`, the gaze in the game's `pv_expression` file, and a **morph audit** that
+> proves nothing the motion animates went unreported. See [CHANGELOG.md](CHANGELOG.md).
 
 > **Tested target:** *Hatsune Miku Project DIVA MEGA39's+* (PC) — the only game the exports
 > have been accepted in. Other DIVA titles/platforms are untested (see
@@ -22,6 +28,8 @@ Motion.vmd  ── import ──► rig ──►  MOT_*.bin          (mot set: 
 Camera.vmd  ────────────────────►  CAMPV*_BASE.a3da   (the file auth_3d loads)
 any audio   ────────────────────►  pv_<id>.ogg        (Ogg/Vorbis 44.1 kHz, SEGA header shape)
 Motion.vmd morphs ──────────────►  PV*.dsc            (MOUTH_ANIM/EXPRESSION spliced into a stock script)
+Motion.vmd eyes   ──────────────►  pv_expression/exp_PV<id>.bin   (gaze; the script carries the enable record)
+Motion.vmd morphs ──────────────►  <script>.morph_audit.json      (what every animated morph became, and why)
 ```
 
 ---
@@ -54,7 +62,7 @@ output guards:
 | **Export motion** | `Export Rig` pose, sampled per frame | mot set `.bin` | byte-for-byte compatible with the upstream exporter's accepted output; static/linear/tangent keyset selection |
 | **Export camera** | `Camera.vmd` | `CAMPV…_BASE.a3da` | re-implements the DIVA_CameraTool method end-to-end: VMD → DIVA camera model, no JSON intermediate, no FArC packing |
 | **Export song** | any audio file ffmpeg decodes | 44.1 kHz Ogg/Vorbis `.ogg` | 2ch/4ch, libvorbis `-q` quality, peak normalise; publishes only after re-probing the encode |
-| **Export expressions** | `.vmd` morphs + a stock PV script `.dsc` | a `.dsc` whose face stream is replaced | everything that is not `MOUTH_ANIM`/`EXPRESSION` — notes, stage cues, timings — is preserved record for record |
+| **Export expressions** | `.vmd` morphs + eyes, and a stock PV script `.dsc` (optional — a scaffold is generated when none is given) | the `.dsc` with its face stream replaced, `pv_expression/exp_PV<id>.bin` beside it, and a `.morph_audit.json` | everything that is not `MOUTH_ANIM`/`EXPRESSION` — notes, stage cues, timings — is preserved record for record; the script is re-read and validated against every rule shipping scripts obey before it is published |
 
 The sidebar tab is **DIVA PV** (named so in every language, deliberately — it is what you look
 for). Panels: **Motion**, **Expressions**, **Camera**, **Music**, **Task**.
@@ -120,7 +128,7 @@ open the template → Import motion (.vmd)  [the rig is keyed at 60 fps, time ba
                   → Export motion (.bin)  [samples Export Rig, drives the poles itself]
 open any file     → Export camera  (.vmd → .a3da)
                   → Export song    (any audio → .ogg, name it pv_<id>.ogg)
-                  → Export expressions (.vmd morphs + stock .dsc → new .dsc)
+                  → Export expressions (.vmd morphs + eyes → .dsc + exp_PV<id>.bin + morph audit)
 pack the outputs with your mod builder (FArC packing is intentionally not this add-on's job)
 ```
 
@@ -232,7 +240,8 @@ This project stands on three published upstreams and borrows conventions from a 
 4. **Expression export** — VMD morphs → `MOUTH_ANIM`/`EXPRESSION` cue streams spliced into a
    stock `.dsc`, driven by a knowledge base measured from 1065 shipping PV scripts (265
    performances, 133k mouth cues, 9k expressions) and a strict refusal to emit ids no shipping
-   script contains. This is the largest single subsystem of the fork.
+   script contains. It also writes the eye-motion file `pv_expression/exp_PV<id>.bin` and the
+   morph audit beside the script. This is the largest single subsystem of the fork.
 5. **Bundled game tables** — `expression_slots.json` and the name tables moved out of code into
    package data, so a loose rom folder is optional (an extracted rom can still override).
 6. **One-click ffmpeg fetch** — see below.
@@ -258,7 +267,16 @@ UI (ui.py)                panels, operators, option dialogs, language tables
                    exporter · mot_writer · bone_utils · rig_utils  │
                    pole_utils · camera_core · cam_json · a3da      │
                    audio_ops · audio_ogg · face_core · morph_core  │
-                   dsc_core · vmd_reader · vmd_tracks · ffmpeg_fetch
+                   dsc_core · vmd_reader · vmd_tracks · exp_writer
+                    morph audit:
+                      mmd_morph       the morph model + the name catalog
+                      morph_effect    measured effect signatures
+                      source_model    PMX definitions (panel byte + vertex deltas)
+                      diva_capability what DIVA can express, measured
+                      morph_mapper    effect-based decisions
+                      morph_timeline  lossless frame/weight transfer
+                      morph_audit     completeness, provably
+                      morph_pipeline  one entry point for all of it
 ```
 
 Anything that can run without `bpy` does; the task layer can drive it headlessly, so the tested
@@ -337,7 +355,8 @@ only "within tolerance, never above full scale".
 
 ### Expressions (morphs → `MOUTH_ANIM` / `EXPRESSION`)
 
-Two layers, kept apart on purpose (all maths in bpy-free cores, tested headless):
+The maths lives in bpy-free cores and is driven headlessly, so the tested path and the button path
+are the same path. In order:
 
 1. **Name matching** (`morph_core`): normalise (NFKC/casefold/punctuation-fold), exact against
    the character's real slot table, then the bundled alias tables, then approximation, then the
@@ -363,14 +382,42 @@ Two layers, kept apart on purpose (all maths in bpy-free cores, tested headless)
    `PV_END`, command widths from the `pv_commands.json` table) before publication. Non-face
    records come back bit-identical; `hold`/dialect quirks are honoured.
 
+4. **The face** (`face_core` + `data/expression_rules.json`): a DIVA face is a **held state** that
+   carries the eyes, so an expression is not a blend to match — it is a **threshold condition** on
+   the dance's own morph weights, and the readings in that table were taken off the character in
+   game (`MIK_FACE_SAD` is `困る` engaged; `MIK_FACE_CLOSE` is `まばたき` at 1). Rules are ranked by
+   tier, and a face is always released again, because a face left on *is* an eye left moved. The
+   **eyelids** follow the dance's own `まばたき` — a full closure writes the shut cue, the frame it
+   leaves writes the open one, and `AUTO_BLINK` is never written. The **gaze** becomes
+   `pv_expression/exp_PV<id>.bin` (`exp_writer`, layout-verified before it is published), plus the
+   one record in the script that makes the engine read it.
+5. **Strength and hold.** `MOUTH_ANIM`'s weight and `EXPRESSION`'s intensity are the dance's own
+   level written on the bands SEGA's own scripts use (weight centred on 100, intensity 100..200),
+   read relative to each morph's own peak — the same rule the trigger threshold uses, because an
+   MMD morph's absolute scale is the model author's choice. The engine holds a record's value until
+   the next one, so the strength is re-stated as it moves, and a shape the dance holds longer than
+   the engine's 1000 ms **hold** is re-stated inside it.
+6. **The morph audit** (`morph_pipeline`): every morph the motion animates is classified, mapped and
+   accounted for, and anything DIVA has no dimension for is reported *with that reason*. A name the
+   tooling cannot resolve is never guessed into a shape — it is written to a worklist for a human
+   answer, and the audit says which morphs were answered that way.
+
 ### Language
 
-Every visible string lives in `TEXTS` (en/zh_CN, key sets locked equal by tooling) or
-`hints.json`; report/error popups included. Because Blender bakes `bl_label` into the class
-registration, language switches re-register the affected panels/operators (timer-deferred so a
-class is never swapped during its own draw) and rebuild Scene-property definitions — which is
-safe: stored values survive the delete/re-add (probed across all property kinds). The panel
-title and every option tooltip follow Blender's UI language; the tab name never does.
+Every visible string lives in `TEXTS` (en/`zh_CN`, key sets locked equal by tooling) or
+`hints.json` — 240 keys, panel headers, option labels, hover text, enum items, task-card words and
+operator tooltips. Because Blender bakes `bl_label` into the class registration, language switches
+re-register the affected panels/operators (timer-deferred so a class is never swapped during its own
+draw) and rebuild Scene-property definitions — which is safe: stored values survive the
+delete/re-add (probed across all property kinds). The panel title and every option tooltip follow
+Blender's UI language; the tab name never does.
+
+Two things are checked at **build** time rather than trusted: that every language carries the same
+key set, that no key is defined in both tables (where the `TEXTS` copy could never render), and that
+every `L()` key exists — a missing one degrades to the English source string with no trace, which is
+invisible in a language you read. What deliberately stays English is the diagnostic text the
+bpy-free cores raise: a failed task card shows it as the detail line under a translated frame, so a
+report can be pasted into a bug thread and read by anyone.
 
 ### Fetching ffmpeg (safe by design)
 
@@ -389,6 +436,8 @@ the user's machine fetches them from the build host ffmpeg.org links.
 | `CAMPV<pv>_BASE.a3da` | a3da member format (named channels, Hermite/static records, `PlayControl.Size`), round-trip-checked against a shipped camera member |
 | `pv_<id>.ogg` | Ogg/Vorbis I, 44100 Hz, blocksize `0xB8`, 2 or 4 channels, duration authoritative from the last granule |
 | `PV*.dsc` | `TIME` in 1/100000 s units, `MOUTH_ANIM(chara, 0, shapeIdx, weight, hold)` with the *mouth-table index*, `EXPRESSION(chara, slotId, intensity, −1)` with the **`rob_mot_tbl` slot** — two numbering systems on purpose, learned from 45 inspected originals |
+| `pv_expression/exp_PV<id>.bin` | version 100, 8-byte block descriptors at 32, a NUL-terminated name table, one terminator per region, 16-byte records `(time, tag<<16\|group, value, duration)` on the 60 fps grid; gaze on tags 6/15, 0.5 = straight ahead |
+| `<script>.morph_audit.json` | one record per source morph: its PMX definition, the category it was classified into, the DIVA slot it was mapped to (or the reason it has none), the applied score breakdown, and the keyframes transferred vs dropped |
 
 Game-side mod packaging (FArC containers, `pv_db` rows, model swaps) is out of scope:
 this add-on produces the members, mod builders assemble.
@@ -429,16 +478,19 @@ Repository layout:
 
 ```
 DIVA_PV_Tools/
-├── README.md · LICENSE · .gitignore
+├── README.md · CHANGELOG.md · LICENSE · .gitignore
+├── build.bat · make_release.py            ← release build + install probe
+├── dist/                                  ← the built artifact (not committed)
 ├── diva_pv_tools/                         ← the add-on package, shipped as source
-│   ├── *.py                               (29 modules)
+│   ├── *.py                               (38 modules)
 │   └── data/ + *.json                     (slot tables, name tables, face knowledge base)
 └── template/
     └── MMD to DIVA (A-POSE)_fork.blend    ← motion-pipeline working file (5.1 MB)
 ```
 
-Releases additionally carry the installable `diva_pv_tools-<version>.zip` (the same package
-tree, zipped with exactly one top-level directory as Blender's installer requires).
+Releases additionally carry the installable `diva_pv_tools-<version>.zip` — the same package tree
+plus the three root documents inside the add-on directory, zipped with exactly one top-level
+directory as Blender's installer requires.
 
 - Flat package: format cores (bpy-free, unit-testable), task layer (`task_core` imports no bpy),
   Blender boundary (`ui.py`, `task_blender.py`), template bindings (`bone_utils`, `rig_utils`,
@@ -446,9 +498,11 @@ tree, zipped with exactly one top-level directory as Blender's installer require
   copies in the companion `motion_refinery`; change them in one, sync to the other.
 - Style: stdlib + `bpy` only (no pip), ≤ 100 columns, no type-hint churn, every non-obvious
   number in comments carries how it was measured.
-- The release zip is built and *install-probed* by a packaging script (layout, then a real
-  Blender enable → operator registry → disable → re-enable cycle in a throwaway config).
-  Regression is a headless suite set plus the byte-identity gates named above.
+- The release zip is built and *install-probed* by `make_release.py`, driven by `build.bat`: it
+  refuses a wrong layout, a stray `__pycache__`, a missing required entry, a translation table whose
+  languages disagree in either direction and an `L()` key with no entry — then installs the zip into
+  a throwaway config and enables it there (a real enable → operator registry → disable → re-enable
+  cycle). Two failures here are `build.bat` returning non-zero, never a warning.
 - The add-on phones home to nobody: the only network code path is the user-triggered ffmpeg
   fetch; the only writes are to the files you name and `bin/` after that click.
 
@@ -466,7 +520,8 @@ tree, zipped with exactly one top-level directory as Blender's installer require
   vendored; its authors' work is the reason an MMD dance maps cleanly at all.
 - **diva-camtool** (thtrandomlurker) — cross-checked calibration constants, cited in comments.
 
-This fork is distributed under the **MIT License**, matching upstream; fork maintenance by
-**SeabirdUmidori**. The bundled game-data tables (`BoneDataTypes.xml`, slot/alias tables,
-knowledge statistics) were measured from **Project DIVA** data shipped by SEGA — mod tools,
-game files not included, nothing in this repo redistributes them.
+This fork — **diva_pv_tools**, maintained by **SeabirdUmidori (fork)**, MIT © 2026
+SeabirdUmidori — is distributed under the **MIT License**, matching upstream. The bundled game-data
+tables (`BoneDataTypes.xml`, slot/alias tables, knowledge statistics) were measured from
+**Project DIVA** data shipped by SEGA — mod tools, game files not included, nothing in this repo
+redistributes them.

@@ -187,6 +187,21 @@ def read_camera(path, layout="auto"):
     ridx = (4, 5, 6) if want == "dist" else (3, 4, 5)
     # camera_a3da.rot_is_degrees: the median of the widest rotation, never its maximum,
     # because authors type extra full turns (a reference holds 183 rad at one key)
+    quat = d["dialect"] == "quat"
+    if quat and want != "dist":
+        # The quat-dialect record (PMXEditor / current MMD) is an orbit camera, not a free
+        # transform - recovered key-for-key (438/438) from the game-accepted CameraDiva
+        # conversion of the ブリキノダンス camera.  The seven floats are:
+        #   s0 distance (後退, enters as the camera's local-Y offset)
+        #   s1 target X, s2 target Z, s3 target Y-height          <- 3.099 there is 25 cm
+        #   s4..s6 euler (X, Y, Z) - s6 sits in the reader's `extra`, not in rot
+        # The target empty sits at (s1, s3, s2); the camera is that position plus the
+        # distance carried on the target's attitude; and the blend scene runs in DIVA axes
+        # up to (x, y, z) -> (x, z, -y), the swap the manual bake and a3da both show.
+        # Records the old vote reads as "dist" keep that reading: they are the files whose
+        # current conversion is game-verified (on the reference camera), and the orbit form of them
+        # would move the shot by its pitch term.
+        want, ridx = "orbit", (4, 5, 6)
     worst = sorted(max(abs(_seven(r)[i]) for i in ridx) for r in keys)
     degrees = worst[len(worst) // 2] > 10.0
     scale = math.pi / 180.0 if degrees else 1.0
@@ -195,10 +210,13 @@ def read_camera(path, layout="auto"):
         f = _seven(r)
         if want == "dist":
             dist, pos, rot = f[0], (f[1], f[2], f[3]), (f[4], f[5], f[6])
+        elif want == "orbit":
+            dist, pos, rot = f[0], (f[1], f[3], f[2]), (f[4], f[6], f[5])
         else:
             dist, pos, rot = 0.0, (f[0], f[1], f[2]), (f[3], f[4], f[5])
         out.append({"frame": int(r["frame"]), "dist": dist, "pos": pos,
-                    "rot": tuple(wrap(v * scale) for v in rot), "fov": float(r["fov"])})
+                    "rot": tuple(wrap(v * scale) for v in rot), "fov": float(r["fov"]),
+                    "interp": r.get("interp")})
     info = {"vmd": os.path.abspath(path), "dialect": d["dialect"], "model": d["model"],
             "layout": want, "record_has_distance_slot": has_extra,
             "layout_median_abs_rot": {"dist": dist_first, "pos": pos_first},
@@ -238,31 +256,131 @@ class Curve(object):
         return self.y[lo] + (self.y[hi] - self.y[lo]) * (t - a) / (b - a)
 
 
-def curves(keys):
-    """One Curve per source scalar; rotations stay folded, the samplers are periodic."""
+def _bez(u, p1, p2):
+    i = 1.0 - u
+    return 3 * i * i * u * p1 + 3 * i * u * u * p2 + u * u * u
+
+
+def _bez_solve(dt, p1, p2):
+    lo, hi = 0.0, 1.0
+    for _ in range(24):                        # 24 bisections: 6e-8 of the segment
+        mid = (lo + hi) * 0.5
+        if _bez(mid, p1, p2) < dt:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) * 0.5
+
+
+class InterpCurve(Curve):
+    """The same scalar for the orbit dialect, sampled the way the accepted toolchain
+    samples it: each key pair carries its own four-byte bezier (MMD's curve shapes),
+    and a one-frame key pair is a CUT whose left value holds until the next key.
+
+    Both rules are the tool's own: `__setInterpolation` maps the bytes to handles
+    (its default [20,20,107,107] curve is the straight line, so an untouched file
+    still interpolates linearly), and `detectCameraChange` marks adjacent keys
+    CONSTANT - the engine never lerps across a cut.
+    """
+
+    __slots__ = ("segs",)
+
+    def __init__(self, x, y, segs):
+        Curve.__init__(self, x, y)
+        self.segs = segs                       # per pair: ("hold",) | ("bez", x1, y1, x2, y2)
+
+    def at(self, t):
+        x = self.x
+        if len(x) == 1 or t <= x[0]:
+            return self.y[0]
+        if t >= x[-1]:
+            return self.y[-1]
+        hi = bisect.bisect_right(x, t)
+        lo = hi - 1
+        a, b, va, vb = x[lo], x[hi], self.y[lo], self.y[hi]
+        seg = self.segs[lo]
+        if seg[0] == "hold":
+            return va
+        dt = (t - a) / (b - a)
+        x1, y1, x2, y2 = seg[1], seg[2], seg[3], seg[4]
+        if x1 == y1 and x2 == y2:              # the default curve is exactly linear
+            return va + (vb - va) * dt
+        u = _bez_solve(dt, x1, x2)             # cubic in [0,1]: time from x, value from y
+        return va + (vb - va) * _bez(u, y1, y2)
+
+
+def curves(keys, interp=False):
+    """One Curve per source scalar; rotations stay folded, the samplers are periodic.
+
+    `interp=True` (the orbit reading) additionally consumes each key's 24 interpolation
+    bytes; the block split follows the importer's byte indices
+    (x, z, y, rx, ry, rz, dis, fov) -> (0, 8, 4, 12, 12, 12, 16, 20): block 3 is shared
+    by all three rotations, dis is block 4 and fov block 5.  Under the orbit mapping the
+    scalars sit as s1=x->0, s3=y->1, s2=z->2, all rotations->3, s0=dist->4, fov->5.
+    """
     fr = [k["frame"] for k in keys]
-    return {n: Curve(fr, [pick(k) for k in keys]) for n, pick in (
-        ("dist", lambda k: k["dist"]),
-        ("px", lambda k: k["pos"][0]),
-        ("py", lambda k: k["pos"][1]),
-        ("pz", lambda k: k["pos"][2]),
-        ("rx", lambda k: k["rot"][0]),
-        ("ry", lambda k: k["rot"][1]),
-        ("rz", lambda k: k["rot"][2]),
-        ("fov", lambda k: k["fov"]),
-    )}
+    picks = {
+        "dist": lambda k: k["dist"],
+        "px": lambda k: k["pos"][0],
+        "py": lambda k: k["pos"][1],
+        "pz": lambda k: k["pos"][2],
+        "rx": lambda k: k["rot"][0],
+        "ry": lambda k: k["rot"][1],
+        "rz": lambda k: k["rot"][2],
+        "fov": lambda k: k["fov"],
+    }
+    blocks = {"px": 0, "py": 1, "pz": 2, "rx": 3, "ry": 3, "rz": 3, "dist": 4, "fov": 5}
+    out = {}
+    for n, pick in picks.items():
+        vals = [pick(k) for k in keys]
+        if not interp:
+            out[n] = Curve(fr, vals)
+            continue
+        segs = []
+        for i in range(len(fr) - 1):
+            if fr[i + 1] - fr[i] <= 1:                       # a cut: hold the left value
+                segs.append(("hold",))
+                continue
+            raw = keys[i].get("interp")
+            b = blocks[n] * 4
+            if raw is None or len(raw) < b + 4:
+                segs.append(("bez", 20 / 127.0, 20 / 127.0, 107 / 127.0, 107 / 127.0))
+                continue
+            c = raw[b:b + 4]
+            segs.append(("bez", c[0] / 127.0, c[1] / 127.0, c[2] / 127.0, c[3] / 127.0))
+        segs.append(("hold",))                               # the trailing key never resolves
+        out[n] = InterpCurve(fr, vals, segs)
+    return out
 
 
-def eye_and_aim(layout, px, py, pz, rx, ry, dist, unit=UNIT):
+def eye_and_aim(layout, px, py, pz, rx, ry, dist, unit=UNIT, rz=0.0):
     """(eye, aim) in DIVA metres for one source sample.  See the module docstring."""
+    if layout == "orbit":
+        # the quaternion dialect, verbatim: camera = target + attitude-rotated local-Y
+        # distance, and the scene's DIVA frame is the blend (x, y, z) -> (x, z, -y).
+        # M = Rz@Ry@Rx (Blender's XYZ Euler); u = M @ (0, 1, 0) is its second column.
+        cx, sx, cy, sy_, cz, sz = (math.cos(rx), math.sin(rx), math.cos(ry), math.sin(ry),
+                                   math.cos(rz), math.sin(rz))
+        ux = cz * sy_ * sx - sz * cx
+        uy = sz * sy_ * sx + cz * cx
+        uz = cy * sx
+        ex, ey, ez = px + dist * ux, py + dist * uy, pz + dist * uz
+        return (ex * unit, ez * unit, -ey * unit), (px * unit, pz * unit, -py * unit)
     cx, sx, cy, sy_ = math.cos(rx), math.sin(rx), math.cos(ry), math.sin(ry)
     aim = (px * unit, py * unit, -pz * unit)
     if layout == "dist" and abs(dist) > 1e-4:
         ux, uy, uz = -sy_ * cx, sx, cy * cx
         return ((px + dist * ux) * unit, (py + dist * uy) * unit,
                 -(pz + dist * uz) * unit), aim
-    # no 距離 to work from: the position is the eye, aim down the view axis (build_world)
     fx, fy, fz = sy_ * cx, -sx, cy * cx
+    if abs(dist) > 1e-4:
+        # the quat reading put the camera's own distance in dist: the target lies down the
+        # view axis, so the interest is the eye pulled forward by that distance - which is
+        # (x, y, 0) for the straight-ahead dance this was verified against, exactly what the
+        # manual game-accepted conversion has
+        d = dist * unit
+        return aim, (aim[0] - fx * d, aim[1] - fy * d, aim[2] - fz * d)
+    # no 距離 to work from: the position is the eye, aim down the view axis (build_world)
     d = min(60.0, max(10.0, math.sqrt(px * px + (py - BODY_Y) ** 2 + pz * pz))) * unit
     return aim, (aim[0] + fx * d, aim[1] + fy * d, aim[2] + fz * d)
 
@@ -307,15 +425,21 @@ def channel(pairs, size, simplify=True, decimals=STATIC_DECIMALS):
             len(pairs))
 
 
-def sample_streams(keys, info, unit=UNIT, band=FOV_BAND, min_y=None):
+def sample_streams(keys, info, unit=UNIT, band=FOV_BAND, min_y=None, y_offset=0.0):
     """Per-output-frame samples of the six position channels + roll + fov."""
     size = info["last_frame"] * FRAME_STEP + 1
-    c = curves(keys)
+    c = curves(keys, interp=(info["layout"] == "orbit"))
     rows = []
     for f in range(size):
         t = f / float(DST_FPS) * SRC_FPS
         eye, aim = eye_and_aim(info["layout"], c["px"].at(t), c["py"].at(t), c["pz"].at(t),
-                               c["rx"].at(t), c["ry"].at(t), c["dist"].at(t), unit)
+                               c["rx"].at(t), c["ry"].at(t), c["dist"].at(t), unit,
+                               rz=c["rz"].at(t))
+        if y_offset:
+            # the whole shot, viewpoint and target together, so the framing keeps its angle;
+            # the panel's use is aligning the export with the game floor
+            eye = (eye[0], eye[1] + y_offset, eye[2])
+            aim = (aim[0], aim[1] + y_offset, aim[2])
         if min_y is not None:                       # camera_a3da.floor_clamp, off by default
             eye = (eye[0], max(min_y, eye[1]), eye[2])
             aim = (aim[0], max(min_y, aim[1]), aim[2])

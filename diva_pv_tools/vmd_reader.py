@@ -267,7 +267,10 @@ def records(blob, info, group=4096):
         else:
             vals = struct.unpack_from("<7f", blob, off + 4)
             rec.update({"pos": vals[0:3], "rot": vals[3:6], "extra": vals[6],
-                        "fov": struct.unpack_from("<I", blob, off + 56)[0]})
+                        "fov": struct.unpack_from("<I", blob, off + 56)[0],
+                        # the 24 interpolation bytes mmd_tools splits over 6 channels of
+                        # 4 bezier controls (0..127); cam_json needs them for the orbit model
+                        "interp": bytes(blob[off + 32:off + 56])})
         got.append(rec)
     yield "camera", got
     yield "properties", read_properties(blob, p + info["camera"] * cam.size, info["tail"])
@@ -323,6 +326,7 @@ def read_properties(blob, p, tail):
 
 
 def tracks(records):
+    """Group morph records by name: ``{name: [{'frame', 'weight'}, ...]}``."""
     """Group keyframes into {name: [(frame, payload)...]} sorted by frame."""
     out = {}
     for r in records:
@@ -330,6 +334,15 @@ def tracks(records):
     for v in out.values():
         v.sort(key=lambda r: r["frame"])
     return out
+
+
+def last_frame(path):
+    """The last frame any morph keyframe in this VMD sits on.
+
+    `export_face` needs it to size the output grid: a dance longer than its borrowed base
+    script must not have its late cues clamped onto the base's last frame and dropped.
+    """
+    return max((r["frame"] for r in read(path)["morphs"]), default=0)
 
 
 def summarize(path):

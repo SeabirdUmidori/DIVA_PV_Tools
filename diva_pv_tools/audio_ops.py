@@ -23,22 +23,22 @@ WHAT THE GAME ACTUALLY REQUIRES (re-measured against real game files for every c
     mods ship Lavf vendors).
   * songs are loose files (not inside a FArC) at `rom/sound/song/pv_<id>.ogg`, registered in
     pv_db.txt as `pv_XXX.song_file_name=rom/sound/song/pv_XXX.ogg`.
-  * 2-channel songs work in game: pv_643/pv_70200 are installed mods that play.  The rear pair of
-    SEGA's quads carries a *real independent mix* (pv_249 whole-file RMS 2238.7/2210.6 against front
-    2905.6/2956.0), while pv_8331 (installed, plays) has rear RMS 0.0/0.0 - so "4 channels" and
+  * 2-channel songs work in game: two installed 2-channel mods play.  The rear pair of SEGA's quads
+    carries a *real independent mix* (one shipped quad, whole-file RMS 2238.7/2210.6 against front
+    2905.6/2956.0), while an installed quad mod that plays has rear RMS 0.0/0.0 - so "4 channels" and
     "4 channels with rear content" are two different properties and only the first is required.
-  * bitrate-field shapes actually installed and playing: max 0/nom 384000 (pv_8325), and
-    **max -1/low -1**/nom 224000 (pv_8331).  So `maximum == 0` is what SEGA writes, not what the
+  * bitrate-field shapes actually installed and playing: max 0/nom 384000 on one quad mod, and
+    **max -1/low -1**/nom 224000 on another.  So `maximum == 0` is what SEGA writes, not what the
     loader demands: this module *produces* SEGA's shape and only *blocks* a positive maximum.
   * duration comes from the last page's granule position (pv_db has no length key).  SEGA granules
     are multiples of a 60 fps frame (735 samples) or exactly 366 past one: `granule % 735 in
-    {0, 366}` for 157 + 122 = 279/279.  Working mods break that (pv_8325 residue 201,
-    pv_8331 residue 720), so the grid is reported for the panel, never enforced.
+    {0, 366}` for 157 + 122 = 279/279.  Working mods break that (residues 201 and 720 on the two
+    quad mods above), so the grid is reported for the panel, never enforced.
   * decoding the three files above renders *exactly* the granule count (delta 0 samples), so
     `check_diva_ready`'s granule-vs-decoded comparison has no slack on real game files.
-  * one RMS window at the top of a file is not enough to prove rear content: pv_8325 reads rear RMS
-    0.0/0.0 over its first 15 s and 3838.5/3809.9 by max-over-windows, so channel_levels() samples
-    four positions and takes the per-channel maximum.
+  * one RMS window at the top of a file is not enough to prove rear content: one of those quad mods
+    reads rear RMS 0.0/0.0 over its first 15 s and 3838.5/3809.9 by max-over-windows, so
+    channel_levels() samples four positions and takes the per-channel maximum.
 
 Why the gate exists: piping an ogg through a second lossy stage with `-t` can yield a song
 4380 samples (~0.099 s, six DIVA frames at 60 fps) short.  DIVA takes
@@ -181,8 +181,8 @@ QUALITY_RANGE = (-0.2, 10.0)
 # print "4.0 not supported by Vorbis: output stream will have incorrect channel layout", but that
 # names ffmpeg's intermediate layout: the muxed file carries 4 channels in the id header and both
 # libavcodec and ffprobe read it back as `quad`, which is the canonical Vorbis order (FL FR RL RR)
-# the game's own songs use (pv_249, pv_8325 measured).  Silence is spelled as a zeroed coefficient
-# because ffmpeg's pan rejects a bare literal 0.
+# the game's own songs use (measured on a shipped song and on an installed quad mod).  Silence is
+# spelled as a zeroed coefficient because ffmpeg's pan rejects a bare literal 0.
 QUAD_FILL = {
     "silence": "pan=4c|c0=FL|c1=FR|c2=0*FL|c3=0*FL",
     "copy": "pan=4c|c0=FL|c1=FR|c2=FL|c3=FR",
@@ -198,12 +198,12 @@ NORM_TOLERANCE_DB = 1.5
 NORM_MAX_ATTEMPTS = 3
 LEVEL_WINDOW_SECONDS = 30.0          # channels 2/3 are measured over this window
 LENGTH_TOLERANCE_FRAMES = 1          # one audio frame == one sample at 44100
-# measured by channel_levels() itself (max over 4 x 30 s windows, no -ac) on
-# pv_249: the rear pair is a real second mix, not a copy of the front.
-SEGA_REAR_RMS_PV249 = (2410.8, 2361.6)
-SEGA_FRONT_RMS_PV249 = (3103.2, 3162.1)
+# measured by channel_levels() itself (max over 4 x 30 s windows, no -ac) on a shipped quad:
+# the rear pair is a real second mix, not a copy of the front.
+SEGA_REAR_RMS_SHIPPED = (2410.8, 2361.6)
+SEGA_FRONT_RMS_SHIPPED = (3103.2, 3162.1)
 # granule % 735 over all 279 SEGA songs: 157 land on an exact 1/60 s frame (0) and 122 on 366.
-# Never enforced - pv_8325 (201) and pv_8331 (720) are installed and play.
+# Never enforced - two installed quad mods (residues 201 and 720) play.
 SEGA_FRAME_GRID_RESIDUES = (0, 366)
 
 
@@ -356,8 +356,8 @@ def probe(path):
         "frame_grid_residue_samples": residue,
         "on_sega_frame_grid": residue in SEGA_FRAME_GRID_RESIDUES,
         "frame_grid_note": "informational only: of 279 SEGA granules 157 are exact 1/60 s frames and "
-                           "122 sit at residue 366, but the installed pv_8325 (residue 201) and "
-                           "pv_8331 (720) both play, so the grid is never enforced",
+                           "122 sit at residue 366, but two installed quad mods (residues 201 and "
+                           "720) both play, so the grid is never enforced",
         "bitrate_actual_bps": (os.path.getsize(path) * 8.0 / info.duration_seconds
                                if info.duration_seconds > 0 else 0.0),
         "metadata_tags": comments,
@@ -376,8 +376,8 @@ def channel_levels(path, seconds=LEVEL_WINDOW_SECONDS, ffmpeg=None,
                    positions=(0.02, 0.28, 0.55, 0.82), cancel=None):
     """Per-channel RMS/peak of an ogg, measured from decoded PCM at several points in the file.
 
-    A single head window lies often enough to matter: measured on a shipped song, pv_8325
-    reads rear RMS 0.0/0.0 across its first 15 s (instrumental intro) but
+    A single head window lies often enough to matter: measured on a shipped quad mod,
+    the rear pair reads RMS 0.0/0.0 across its first 15 s (instrumental intro) but
     3727.3/3690.6 at the 25% mark.  So several short windows are decoded and, per channel, the
     maximum RMS/peak over them is what `levels` reports; every window is kept in `windows`.
 
@@ -504,7 +504,7 @@ def convert(src, out, *, channels=2, quality=None, sample_rate=DIVA_SAMPLE_RATE,
     exact peak, which no lossy codec can promise.
     `quad_fill` decides what channels 2/3 get when the source is stereo: "copy" duplicates the
     front pair (real content, 6 dB hot if the game ever downmixes) or "silence" leaves the rear
-    pair empty (what pv_8331 ships, and it plays).
+    pair empty (which a shipped quad mod does, and it plays).
 
     Stages: (1) decode the source to PCM at `sample_rate`, keeping a 4-channel source's rear mix
     intact and only filling/pan when the channel counts differ; (2) libvorbis-encode to a scratch
@@ -559,7 +559,7 @@ def convert(src, out, *, channels=2, quality=None, sample_rate=DIVA_SAMPLE_RATE,
 
     workdir = tempfile.mkdtemp(prefix="diva_audio_")
     try:
-        # ---- peak normalisation, measured first so the gain is a number we can verify afterwards.
+        # ---- peak normalisation, measured first so the gain is a number that can be verified later.
         # The target is aimed NORM_HEADROOM_DB *under* the requested peak, because the lossy stage
         # puts the peak back up again: measured on this material at q5/q7, the encoded float peak
         # lands +0.94 to +2.23 dB above the PCM peak it was handed, and not as a constant, so a
@@ -704,7 +704,8 @@ def convert(src, out, *, channels=2, quality=None, sample_rate=DIVA_SAMPLE_RATE,
         if channels == 4:
             if fill == "silence":
                 checks.append(("rear pair intentionally silent", all(l["rms"] == 0.0 for l in rear),
-                               "ch2/ch3 RMS %s (quad_fill=silence; pv_8331 proves the game plays this)"
+                               "ch2/ch3 RMS %s (quad_fill=silence; a shipped mod proves the game "
+                               "plays this)"
                                % [l["rms"] for l in rear]))
             else:
                 checks.append(("rear pair carries content", all(l["rms"] > 0.0 for l in rear),
@@ -788,12 +789,13 @@ def check_diva_ready(path, *, allow_silent_rear=False, require_sega_bitrate_shap
     `deep=True` additionally decodes the file to compare the rendered sample count with the granule
     (the class of bug that makes a PV play out of sync) and, for a quad file, measures channels 2/3
     instead of trusting the header.  Both need ffmpeg; if it is missing that is reported as a reason
-    rather than skipped silently, because a file we cannot finish checking is not a file we can
-    promise works.  `allow_silent_rear=True` demotes the "quad with empty rear pair" case, and
+    rather than skipped silently, because a file that cannot be finished checking is a file whose
+    behaviour cannot be promised.  `allow_silent_rear=True` demotes the "quad with empty rear pair"
+    case, and
     `require_sega_bitrate_shape=True` turns maximum/lower != 0 into a reason; both stay demoted by
-    default because the installed, playable pv_8331 has rear RMS 0.0/0.0 *and* maximum -1/lower -1 -
+    default because an installed, playable quad mod has rear RMS 0.0/0.0 *and* maximum -1/lower -1 -
     inventing a blocker that a real working file violates would make the gate useless.
-    Extra comment tags are deliberately NOT a reason for the same reason (pv_8331 ships 3).
+    Extra comment tags are deliberately NOT a reason for the same reason (that mod ships 3).
     """
     try:
         info = probe(path)
@@ -846,7 +848,7 @@ def check_diva_ready(path, *, allow_silent_rear=False, require_sega_bitrate_shap
     if require_sega_bitrate_shape and not info["sega_bitrate_shape"]:
         reasons.append("id-header maximum/lower bitrate are %d/%d instead of the 0/0 every SEGA song "
                        "writes (this looks like a bitrate-mode -b encode; re-encode with a quality "
-                       "value) - advisory: the installed pv_8331 also writes -1/-1 and plays"
+                       "value) - advisory: an installed quad mod also writes -1/-1 and plays"
                        % (info["bitrate_maximum"], info["bitrate_lower"]))
 
     # ---- measurements that need a decoder, not a header
@@ -867,11 +869,11 @@ def check_diva_ready(path, *, allow_silent_rear=False, require_sega_bitrate_shap
                     if not allow_silent_rear and all(l["rms"] == 0.0 for l in rear):
                         reasons.append("it claims 4 channels but channels 2/3 are silent (max RMS %s "
                                        "over %d decoded windows of %.0f s); SEGA's own quads hold a real "
-                                       "second mix there (pv_249 measures RMS %s/%s) - pass "
-                                       "allow_silent_rear=True for the pv_8331-style silent rear pair"
+                                       "second mix there (a shipped quad measures RMS %s/%s) - pass "
+                                       "allow_silent_rear=True for a shipped silent rear pair"
                                        % ([l["rms"] for l in rear], len(levels["windows"]),
                                           levels["window_seconds"],
-                                          SEGA_REAR_RMS_PV249[0], SEGA_REAR_RMS_PV249[1]))
+                                          SEGA_REAR_RMS_SHIPPED[0], SEGA_REAR_RMS_SHIPPED[1]))
             if deep:
                 try:
                     back = decoded_length(path, info["sample_rate"], ff)
@@ -905,7 +907,7 @@ def suggest_song_file_name(name, *, pv_id=None, taken=()):
     Rules (all measurable, no locale magic): ASCII only, lowercase, `[a-z0-9_]` after `pv_`, the id
     part at most 20 characters, `.ogg` appended once.  Game evidence: every song in main/dlc00 is
     `pv_<id>.ogg` (longest is pv_238_kaito.ogg = 16 chars) and every installed mod song is too
-    (longest 20 chars, e.g. pv_70200.ogg / pv_002_len.ogg); Japanese or spaces in the name would go
+    (longest 20 chars, e.g. pv_00099.ogg / pv_002_len.ogg); Japanese or spaces in the name would go
     straight into `pv_XXX.song_file_name` in pv_db.txt, so they are never allowed to survive here.
     A name with no ASCII stem (pure Japanese) becomes `pv_t<4 hex>` derived from the string, so the
     suggestion is deterministic and collision-free rather than a constant.  `pv_id` (digits, or

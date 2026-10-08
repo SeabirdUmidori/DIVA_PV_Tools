@@ -20,6 +20,7 @@ packaged `diva_face_targets.json`.  Those names are not a guess, and the shippin
 corroborates them independently: the five most frequent mouth shapes are A, O, RESET, I, U, and the
 five most frequent transitions are between exactly those.
 """
+import collections
 import json
 import math
 import os
@@ -42,15 +43,9 @@ VISEME_ALIASES = {
     "HE": "LAUGH_OPEN", "HAMISE": "TEETH", "NEKO": "CAT", "MOGUMOGU": "CHEW",
     "HERAHERA": "SLACK", "SANKAKU": "TRIANGLE", "SHIKAKU": "SQUARE",
 }
-# expression ids normalise the same way, onto mood dimensions
-MOOD_QUALIFIERS = ("_OLD_CL", "_OLD", "_CL")
-MOOD_ALIASES = {
-    "RESET": "NEUTRAL", "CLOSE": "NEUTRAL",
-    "SAD": "SAD", "LAUGH": "HAPPY", "SURPRISE": "SURPRISE", "WINK": "WINK",
-    "SETTLED": "CALM", "DAZZLING": "SHY", "LASCIVIOUS": "ALLURE", "STRONG": "ANGRY",
-    "CLARIFYING": "PUZZLED", "GENTLE": "SOFT", "CRY": "CRY", "NAGASI": "GAZE",
-    "KIRI": "PROUD", "UTURO": "DAZE",
-}
+# expression ids normalise the same way, onto mood dimensions.  The tables live in
+# `diva_capability`, which is where the *reporting* layer reads them; this module - the part that
+# decides what gets written - has no expression vocabulary left, because it no longer solves one.
 
 
 def _strip(name, qualifiers):
@@ -62,22 +57,22 @@ def _strip(name, qualifiers):
 
 
 def build_semantics(targets):
-    """(mouth_id -> viseme), (expression_id -> mood), and the reverse index.
+    """``{mouth_id: viseme}`` - which canonical articulation each measured mouth shape is.
 
     Only ids whose asset name is known get a viseme.  An id with no name stays unlabelled and is
     never emitted: the alternative is to guess what shape 37 looks like, and a wrong guess here is
     invisible until the character is on screen.
+
+    Expression ids are deliberately absent.  The exporter does not solve a face any more, so there is
+    no mood dimension to name; `diva_capability` keeps the mood tables for the morph *audit*, which
+    is a report and not a byte in the script.
     """
-    mouth, mood = {}, {}
+    mouth = {}
     for key, name in (targets.get("mouth_shape_names") or {}).items():
         base = _strip(name.replace("MIK_KUCHI_", ""), VISEME_QUALIFIERS)
         if base in VISEME_ALIASES:
             mouth[int(key)] = VISEME_ALIASES[base]
-    for key, name in (targets.get("expression_id_names") or {}).items():
-        base = _strip(name.replace("MIK_FACE_", ""), MOOD_QUALIFIERS)
-        if base in MOOD_ALIASES:
-            mood[int(key)] = MOOD_ALIASES[base]
-    return mouth, mood
+    return mouth
 
 
 def load_knowledge(data_dir=DATA):
@@ -86,8 +81,6 @@ def load_knowledge(data_dir=DATA):
     for key, name in (("mouth", "mouth_prototypes.json"),
                       ("mouth_trans", "mouth_transitions.json"),
                       ("mouth_dur", "mouth_durations.json"),
-                      ("expression", "expression_prototypes.json"),
-                      ("expression_trans", "expression_transitions.json"),
                       ("lyric", "lyric_offsets.json"),
                       ("motion", "motion_expression.json"),
                       ("context", "context_model.json")):
@@ -221,6 +214,7 @@ def _motion_intensity(seq):
     """
     if not seq.frames:
         return None
+    from . import morph_core as mc           # the quaternion helpers used below live there
     total = np.zeros(seq.frames)
     for i in range(seq.bones):
         if mc.classify(seq.names[i]) in (None, "root"):
@@ -241,6 +235,9 @@ CONFIG_DEFAULT = {
     "w_transition": 0.55,     # weight on the KB transition log-probability
     "w_duration": 0.30,       # weight on the KB duration log-probability
     "w_lyric": 0.0,           # weight on a supplied phoneme/lyric timeline; 0 = absent
+    # Weight on a supplied phoneme timeline.  `_emission` reads it with `.get`, so it has to exist
+    # here or the file's value is ignored; no pipeline produces a timeline yet, so 0 changes nothing.
+    "w_phoneme": 0.0,
     "w_variant": 0.25,        # preference between two ids that mean the same viseme
     "min_event_s": 0.06,      # shorter than this and an event is merged into its neighbour
     # 0 means "take the ceiling from the corpus's own p90 event rate"; see `Model.rate_p90`
@@ -259,25 +256,39 @@ CONFIG_DEFAULT = {
     "key_rate_hz": 0.0,       # 0 = take the rate from the knowledge base
     "floor": 0.12,            # below this a canonical dimension counts as zero
     "weight_scale": 1.0,      # multiplies the KB's own weight for a shape
-    "expression": True,
-    "expression_min_hold_s": 0.25,
+    # The phoneme weight at or above which a texture viseme is excluded outright.  See TEXTURE_VISEMES.
+    "texture_yield_at": 0.25,
+    # Shape ids the export must never write, whatever the KB says about them.  `MIK_KUCHI_E_DOWN`
+    # (12) is a secondary alternative of the E viseme and corners-down reads as disgust on a face
+    # that is only singing a vowel; `MIK_KUCHI_NIYA` (6) is the bared-teeth smirk, which reads as a
+    # fixed grin whenever the dance holds `にやり` for a while.
+    "excluded_shapes": [12, 6],
     "seed": 20240917,
 }
 
 
 def config(overrides=None, data_dir=DATA):
-    """The calibration file, then any explicit overrides.  No value lives in the code."""
+    """The calibration file, then any explicit overrides.  No value lives in the code.
+
+    A key the file carries but `CONFIG_DEFAULT` does not is **named and ignored** rather than
+    silently dropped - it used to be dropped, which is how two new keys in `retarget_config.json`
+    did nothing at all until the default was added here as well.
+    """
     cfg = dict(CONFIG_DEFAULT)
     path = os.path.join(data_dir, "retarget_config.json")
+    unknown = []
     if os.path.isfile(path):
         with open(path, encoding="utf-8") as handle:
             blob = json.load(handle)
-        for key, value in (blob.get("weights") or {}).items():
-            if key in cfg:
-                cfg[key] = value
-        for key, value in (blob.get("solver") or {}).items():
-            if key in cfg:
-                cfg[key] = value
+        for block in ("weights", "solver"):
+            for key, value in (blob.get(block) or {}).items():
+                if key in cfg:
+                    cfg[key] = value
+                elif not key.startswith("_"):
+                    unknown.append("%s.%s" % (block, key))
+    if unknown:
+        print("face_retarget: retarget_config.json has %d key(s) this build does not read, so they "
+              "have no effect: %s" % (len(unknown), ", ".join(unknown)))
     if overrides:
         cfg.update(overrides)
     return cfg
@@ -297,13 +308,27 @@ class Model(object):
     def __init__(self, knowledge, targets, cfg, verbose=False):
         self.kb = knowledge
         self.cfg = cfg
-        self.mouth_of, self.mood_of = build_semantics(targets)
+        self.mouth_of = build_semantics(targets)
+        # shape id -> asset name, so `_OLD` assets can be told apart from the modern ones
+        self.assets = {}
+        for row in (targets if isinstance(targets, dict) else {}).get("mouth", []):
+            self.assets[row["idx"]] = row.get("name", "")
+        if not self.assets:
+            from . import morph_core as _mc
+            for row in _mc.game_names()["mouth"]:
+                self.assets[row["idx"]] = row.get("name", "")
         self.notes = []
         core = set(knowledge["mouth"].get("core_states") or [])
         shape_count = {s["id"]: s["events"] for s in knowledge["mouth"]["states"]}
+        # `excluded_shapes` in retarget_config.json: shapes the KB knows but the export must never
+        # write.  `MIK_KUCHI_E_DOWN` (12) is the one: it is a *secondary* alternative of the E
+        # viseme, so the variation layer could swap it in for one frame, and corners-down reads as
+        # disgust on a face that is only singing a vowel.
+        excluded = set((cfg or {}).get("excluded_shapes") or [])
         # a shape is usable if its asset name is known and the KB has seen it enough to have an
         # opinion; anything else is dropped, not guessed at
-        self.shapes = [s for s in shape_count if s in self.mouth_of and shape_count[s] >= 4]
+        self.shapes = [s for s in shape_count
+                       if s in self.mouth_of and shape_count[s] >= 4 and s not in excluded]
         self.shape_freq = shape_count
         self.visemes = sorted({self.mouth_of[s] for s in self.shapes})
         self.by_viseme = {v: [s for s in self.shapes if self.mouth_of[s] == v]
@@ -410,27 +435,50 @@ class Model(object):
     def transition_cost(self, a, b):
         return self.logp.get((a, b), math.log(0.01))
 
+    def _prefer(self, shapes):
+        """Drop the `_OLD` assets when a viseme also has a modern one.
+
+        The knowledge base was measured from shipping scripts, and the older scripts use the `_OLD`
+        assets - so `_OLD` shapes are frequent enough to win `shape_freq` outright.  They are the same
+        mouth shape on an older asset, and the user does not want them: a viseme that has both keeps
+        only the modern ones.  A viseme whose *only* assets are `_OLD` (there is none today) keeps
+        them rather than losing the shape entirely.
+        """
+        modern = [s for s in shapes if not self.asset_of(s).endswith("_OLD")]
+        return modern or shapes
+
+    def asset_of(self, shape):
+        return self.assets.get(shape, "")
+
     def shape_alternatives(self, viseme):
-        """This viseme's own shapes, most probable first.
+        """This viseme's own shapes, most probable first, `_OLD` assets dropped where possible.
 
         The whole point of the variation layer is that these are *interchangeable*: they are the
         measured assets for one viseme, so moving between them changes how the mouth looks and not
         what it is saying.
         """
-        return sorted(self.by_viseme[viseme], key=lambda s: (-self.shape_freq[s], s))
+        picks = self._prefer(self.by_viseme[viseme])
+        return sorted(picks, key=lambda s: (-self.shape_freq[s], s))
 
     def pick_shape(self, viseme, rng=None):
         """The most probable id for a viseme under the measured frequencies, ties by id.
 
         Deliberately deterministic: the same input must give the same script, so an export is
-        reproducible byte for byte.
+        reproducible byte for byte.  `_OLD` assets lose to a modern one for the same viseme.
         """
-        return max(self.by_viseme[viseme], key=lambda s: (self.shape_freq[s], -s))
+        picks = self._prefer(self.by_viseme[viseme])
+        return max(picks, key=lambda s: (self.shape_freq[s], -s))
 
 
 # ------------------------------------------------------------------ MMD -> canonical vector
+#: How flat a curve has to be to count as never moving.  A VMD weight is a float32 and a curve with
+#: a single key interpolates to the identical float everywhere, so the tolerance only has to absorb
+#: a rounding crumb, not a real gesture.
+STATIC_EPS = 1e-6
+
+
 def canonical_vectors(tracks, plan, frames, cfg=None):
-    """{viseme: [weight per frame]} from the MMD morph curves.
+    """``(weights, static)`` - {viseme: [weight per frame]} from the MMD morph curves.
 
     One morph may feed several visemes and one viseme may take from several morphs - the morph named
     for a mouth shape contributes to that viseme, and a morph named for an emotion contributes to the
@@ -438,15 +486,46 @@ def canonical_vectors(tracks, plan, frames, cfg=None):
     mouth-shape morph from arguing over the same frame.
 
     Values are resampled onto the 60 fps output grid by the same whole-file scale the existing
-    exporter uses, so lip sync stays a time phenomenon rather than a per-morph one.
+    exporter uses, so lip sync stays a time phenomenon rather than a per-morph one - and they are
+    **interpolated between keys**, not taken at the keys.  Reading only the keyed frames and then
+    decaying that value forward (`curve[f] = max(curve[f], curve[f-1] * 0.86)`) made a sustained morph
+    read as silence: `0.7 * 0.86 ** 12` is under the 0.12 floor, so twelve frames after every key the
+    viseme stopped being active at all, the solver saw a frame with nothing on it, and it wrote the
+    rest viseme.  On the reference FACIAL dance, whose `あ` has keys at output
+    frames 1086 and 1306 with nothing between, that closed the mouth for **3.45 s** while `あ` sat at
+    0.70 - the "mouth will not hold" this was reported as.  MMD morphs interpolate; so does this.
+
+    **A curve that never moves is not evidence, and is returned in `static` instead.**  This is the
+    same question `morph_core` already answers for its `peak` field ("carries real animation": more
+    than one key and a non-zero peak), applied to the curve rather than to the key count, and the
+    reason it has to be asked here is that the answer decides the *state sequence*.  A morph the
+    choreographer never touched is a rest-pose offset of the model - the MMD author's own answer to
+    "what does this face look like by default" - and it carries no timing at all: it cannot say
+    *when* the mouth should do anything, only that the model sits that way.  Feeding one in anyway
+    breaks the solver in two ways at once, both of them visible on screen:
+
+      * `_emission` scores the rest state from ``sum(row.values()) == 0``, i.e. "nothing is
+        animated".  A constant at or above `floor` makes that sum positive on **every** frame, so
+        the rest branch is unreachable and the mouth can never close;
+      * the emission is a normalised *share*, so a constant at 0.32 is 100% of the active mass on
+        every frame no vowel covers - the solver then wears that one texture for the whole dance.
+
+    Measured on the export that reported a character "grinning with its mouth open the entire song":
+    one constant key of the smile slider `口角上げ` at 0.320 produced `MIK_KUCHI_SMILE` 391 times and
+    `MIK_KUCHI_RESET` **zero** times in 4122 cues, against 473 of 473 shipping and converted scripts
+    that return to the rest shape at least once (median 29% of their cues).  Its *value* is not
+    discarded: `face_core.apply_strength` writes the strength of a cue from the raw curves, so a
+    shape chosen for other reasons still reads this morph's own weight.  Nothing is dropped
+    silently - the names come back in `static` and the export reports them.
     """
+    from . import face_core as fc
     cfg = cfg or CONFIG_DEFAULT
     model_mouth = {}
     weights = {}
+    static = []
     last = max((k["frame"] for keys in tracks.values() for k in keys), default=0)
     if last <= 0 or frames <= 0:
-        return {}
-    scale = frames / float(last + 1)
+        return {}, []
     for name, keys in tracks.items():
         entry = plan.get(name)
         if not entry or entry[0] != "mouth":
@@ -458,14 +537,15 @@ def canonical_vectors(tracks, plan, frames, cfg=None):
             model_mouth[entry[2]] = viseme
         if viseme is None:
             continue
+        sampled = fc._sample_grid(sorted(keys, key=lambda k: k["frame"]), frames)
+        if max(sampled) - min(sampled) <= STATIC_EPS:
+            static.append(name)
+            continue
         curve = weights.setdefault(viseme, [0.0] * frames)
-        for k in keys:
-            f = min(frames - 1, max(0, int(round(k["frame"] * scale))))
-            curve[f] = max(curve[f], float(k["weight"]))
-    for viseme, curve in weights.items():
-        for f in range(1, frames):
-            curve[f] = max(curve[f], curve[f - 1] * 0.86)      # a hold is a hold, not a dropout
-    return weights
+        for f in range(frames):
+            if sampled[f] > curve[f]:
+                curve[f] = sampled[f]
+    return weights, sorted(static)
 
 
 # ------------------------------------------------------------------ the solver
@@ -473,6 +553,18 @@ NEG = -1.0e9
 # The rest viseme, i.e. `MIK_KUCHI_RESET`.  Named once here and justified by the measured
 # shipping-script fallback rather than by a second guess.
 REST_VISEME = "CLOSED"
+
+#: Visemes that are **articulation** - the mouth saying something.  A DIVA mouth shows one shape at
+#: a time, so when one of these is on the character it is what the mouth should show.
+PHONEME_VISEMES = ("A", "E", "I", "O", "U", "OPEN", "TEETH")
+#: Visemes that are **texture** - how the mouth is held rather than what it is saying.  A smirk or a
+#: smile sits on the mouth for as long as the morph is up, and because the emission is a normalised
+#: *share*, a steady one beats any phoneme weaker than itself: `にやり` parked at 0.5 for 28 seconds
+#: held `MIK_KUCHI_NIYA` for **15 seconds** over a singer who was plainly articulating vowels, and
+#: the transition cost then kept it there even when a vowel reached 0.82.  Texture yields to
+#: articulation by `phoneme_over_texture` (see `_emission`); the same morph still reaches the face
+#: through the expression tiers, where a held state is what is wanted.
+TEXTURE_VISEMES = ("SMIRK", "SMILE", "SLACK", "POUT", "CAT")
 
 
 def _distribution(weights, visemes, floor):
@@ -511,6 +603,36 @@ def _emission(active, model, cfg, ctx=None):
     supplied the term does not exist and the solver is exactly the one that was already tested.
     """
     frames = len(active)
+    # Texture yields to articulation **outright** while a phoneme is on the character at
+    # `texture_yield_at` or more.  A soft penalty was tried first and was not enough: the transition
+    # matrix's cost of leaving a held viseme and coming back (w_transition 0.55 times a log
+    # probability that is easily -8) dwarfs any emission difference, so `MIK_KUCHI_NIYA` still held
+    # for 2.3 seconds over a singer whose `あ` was at 0.85.  Making it a hard rule is what the
+    # requirement actually is - "the held grin must be overridable by other mouth shapes".
+    yield_at = float(cfg.get("texture_yield_at") or 0.0)
+    if yield_at:
+        out = []
+        for f in range(frames):
+            row = active[f]
+            total = sum(row.values())
+            scores = {}
+            if total > 0.0:
+                for v in model.visemes:
+                    share = row.get(v, 0.0) / total
+                    scores[v] = cfg["w_vector"] * math.log(share + 1e-4)
+            else:
+                for v in model.visemes:
+                    scores[v] = (cfg["w_vector"] * math.log(1.0 - 1e-3) if v == REST_VISEME
+                                 else cfg["w_vector"] * math.log(1e-3 / max(1,
+                                                                            len(model.visemes) - 1)))
+            if any(row.get(p, 0.0) >= yield_at for p in PHONEME_VISEMES):
+                for v in TEXTURE_VISEMES:
+                    if v in scores:
+                        scores[v] = NEG
+            out.append(scores)
+            if ctx is not None and cfg.get("w_phoneme"):
+                _add_phoneme(scores, model, cfg, ctx, f)
+        return out
     out = []
     for f in range(frames):
         row = active[f]
@@ -524,17 +646,23 @@ def _emission(active, model, cfg, ctx=None):
             for v in model.visemes:
                 scores[v] = (cfg["w_vector"] * math.log(1.0 - 1e-3) if v == REST_VISEME
                              else cfg["w_vector"] * math.log(1e-3 / max(1, len(model.visemes) - 1)))
-        if ctx is not None and cfg.get("w_phoneme"):
-            guess = ctx.phoneme_at(f)
-            if guess is not None:
-                viseme, confidence = guess
-                for v in model.visemes:
-                    if v == viseme:
-                        scores[v] += cfg["w_phoneme"] * confidence
-                    else:
-                        scores[v] -= cfg["w_phoneme"] * confidence * 0.15
         out.append(scores)
+        if ctx is not None and cfg.get("w_phoneme"):
+            _add_phoneme(scores, model, cfg, ctx, f)
     return out
+
+
+def _add_phoneme(scores, model, cfg, ctx, frame):
+    """The optional external phoneme/lyric timeline, as an additive term (never a multiplier)."""
+    guess = ctx.phoneme_at(frame)
+    if guess is None:
+        return
+    viseme, confidence = guess
+    for v in model.visemes:
+        if v == viseme:
+            scores[v] += cfg["w_phoneme"] * confidence
+        else:
+            scores[v] -= cfg["w_phoneme"] * confidence * 0.15
 
 
 def _section_duration_scale(ctx, frame):
@@ -612,9 +740,9 @@ def solve_mouth(tracks, plan, frames, model, cfg, fps=60.0, explain=None, ctx=No
       3. Merge anything still shorter than `min_event_s` into the neighbour it is closest to, which
          is what turns the path into events the encoder can write.
     """
-    weights = canonical_vectors(tracks, plan, frames, cfg)
+    weights, static = canonical_vectors(tracks, plan, frames, cfg)
     if not weights:
-        return [], [], {"reason": "no morph resolved to a mouth viseme"}
+        return [], [], {"reason": "no morph resolved to a mouth viseme", "static_morphs": static}
     active = _distribution(weights, model.visemes, cfg["floor"])
     emission = _emission(active, model, cfg, ctx=ctx)
 
@@ -644,6 +772,7 @@ def solve_mouth(tracks, plan, frames, model, cfg, fps=60.0, explain=None, ctx=No
                           "segments": len(_segments(path)), "compression": compression,
                           "variation": variation,
                           "diversity": visual_diversity(events, model, cfg),
+                          "static_morphs": static,
                           "context": ctx.notes() if ctx is not None else None}
 
 
@@ -1095,107 +1224,21 @@ def _path_to_events(path, model, cfg, fps, active, emission, explain=None):
     return events, rows
 
 
-# ------------------------------------------------------------------ expression
-def solve_expression(tracks, plan, frames, knowledge, targets, cfg, fps=60.0, explain=None):
-    """The expression layer, solved on its own.
-
-    Separate from the mouth on purpose, and the measurements say why: the two have different clocks.
-    The mouth is keyed roughly every 0.2 s and changes shape on 82% of its keys; EXPRESSION is used
-    two or three times in half the songs.  One solver trying to satisfy both would either smear the
-    expressions or chop the mouth, so the two run with their own state spaces, their own transitions
-    and their own minimum holds, and only meet in the event list.
-    """
-    from . import face_core as fc
-
-    mood_of = build_semantics(targets)[1]
-    moods = sorted({m for m in mood_of.values()})
-    if not moods:
-        return [], []
-    curve = {}
-    last = max((k["frame"] for keys in tracks.values() for k in keys), default=0)
-    if last <= 0 or frames <= 0:
-        return [], []
-    scale = frames / float(last + 1)
-    for name, keys in tracks.items():
-        entry = plan.get(name)
-        if not entry or entry[0] != "expression":
-            continue
-        base = _strip(str(entry[2]).replace("MIK_FACE_", ""), MOOD_QUALIFIERS)
-        mood = MOOD_ALIASES.get(base)
-        if mood is None:
-            continue
-        line = curve.setdefault(mood, [0.0] * frames)
-        for k in keys:
-            f = min(frames - 1, max(0, int(round(k["frame"] * scale))))
-            line[f] = max(line[f], float(k["weight"]))
-    if not curve:
-        return [], []
-    for line in curve.values():
-        for f in range(1, frames):
-            line[f] = max(line[f], line[f - 1] * 0.9)
-
-    rows, out = [], []
-    prev = None
-    start = None
-    for f in range(frames + 1):
-        top = None
-        if f < frames:
-            values = [(line[f] if (line := curve.get(m)) else 0.0, m) for m in moods]
-            values = [v for v in values if v[0] >= cfg["floor"]]
-            top = max(values)[1] if values else None
-        if top != prev:
-            if prev is not None and start is not None:
-                out.append((start, f - 1, prev))
-            start, prev = f, top
-    kept = []
-    for a, b, mood in out:
-        if (b - a + 1) / fps < cfg["expression_min_hold_s"]:
-            continue
-        kept.append((a, b, mood))
-    events = []
-    for a, b, mood in kept:
-        eid = _pick_expression(mood, mood_of, knowledge)
-        if eid is None:
-            continue
-        events.append({"frame": a, "end_frame": b, "mood": mood, "id": eid,
-                       "intensity": fc.EXPR_INTENSITY})
-        if explain is not None:
-            explain.append({"frame": a, "time_s": round(a / fps, 4), "mood": mood,
-                            "expression_id": eid, "duration_s": round((b - a + 1) / fps, 4),
-                            "reason": "MMD mood %s held %.2f s (knowledge base: %s)"
-                                      % (mood, (b - a + 1) / fps,
-                                         _expression_note(knowledge, eid))})
-    return events, rows
-
-
-def _pick_expression(mood, mood_of, knowledge):
-    """The expression id already verified for a mood, else the most-used id for it."""
-    from . import dsc_core as dsc
-
-    ids = sorted(i for i, m in mood_of.items() if m == mood and i in dsc.attested_expression_ids())
-    if not ids:
-        return None
-    counts = knowledge["expression"].get("ids") or {}
-    return max(ids, key=lambda i: (int(counts.get(str(i), 0)), -i))
-
-
-def _expression_note(knowledge, eid):
-    counts = knowledge["expression"].get("ids") or {}
-    n = int(counts.get(str(eid), 0))
-    return "%d uses in the shipping scripts" % n if n else "never used by a shipping script"
-
-
 # ------------------------------------------------------------------ the encoder's own interface
 def events_from_solver(tracks, plan, frames, knowledge=None, targets=None, cfg=None,
                        chara=0, weight=None, hold=None, explain=None, data_dir=DATA,
                        seq=None, tempo=None, phonemes=None, lyrics=None, camera_cut=None,
                        motion=None, per_frame=None):
-    """Solve the performance and return it in the shape `face_core.events_from_tracks` returns.
+    """Solve the mouth and return it in the shape `face_core.events_from_tracks` returns.
 
     Same contract - ``(events, unmapped, info)`` with events as ``(frame, command, params)`` - so the
     encoder, the splicer and every validator downstream are untouched.  That separation is the point:
     the part of the exporter that is verified is the part that writes bytes, and nothing here writes
     bytes.
+
+    MOUTH_ANIM only.  There is no expression layer to run and no release cue to write: the only
+    ``EXPRESSION`` records the exporter produces are the blink, and `face_core.export_face` adds
+    those after this returns, from the raw ``まばたき`` curve rather than from the plan.
     """
     from . import dsc_core as dsc
     from . import face_core as fc
@@ -1204,7 +1247,6 @@ def events_from_solver(tracks, plan, frames, knowledge=None, targets=None, cfg=N
     knowledge = knowledge or load_knowledge(data_dir)
     cfg = cfg or config(data_dir=data_dir)
     weight = fc.MOUTH_WEIGHT if weight is None else weight
-    hold = fc.MOUTH_HOLD if hold is None else hold
     model = Model(knowledge, targets, cfg)
     unmapped = sorted(n for n, keys in tracks.items()
                       if n not in plan and keys
@@ -1215,26 +1257,29 @@ def events_from_solver(tracks, plan, frames, knowledge=None, targets=None, cfg=N
                                            explain=[] if explain is None else explain, ctx=ctx,
                                            per_frame=per_frame)
     if not mouth_events:
-        return [], unmapped, {"reason": info.get("reason", "the solver produced no mouth event")}
-    event_list = [(e["frame"], "MOUTH_ANIM", [chara, 0, e["shape"], weight, hold])
+        return [], unmapped, {"reason": info.get("reason", "the solver produced no mouth event"),
+                              "static_morphs": info.get("static_morphs", [])}
+    event_list = [(e["frame"], "MOUTH_ANIM", [chara, 0, e["shape"], weight, 0])
                   for e in mouth_events]
-    expression_events = []
-    if cfg["expression"]:
-        expression_events, _ = solve_expression(tracks, plan, frames, knowledge, targets, cfg,
-                                                fps=fc.DST_FPS, explain=explain)
-        event_list += [(e["frame"], "EXPRESSION", [chara, e["id"], e["intensity"], -1])
-                       for e in expression_events]
-    event_list.sort(key=lambda r: (r[0], r[1] != "EXPRESSION"))
+    # `hold` is how long each record stands; keeping a shape alive past it is `repeat_held_shapes`'
+    # job in `export_face`, and that works on the merged stream.
+    holds_used = []
+    for _event, cue in zip(mouth_events, event_list):
+        value = int(hold) if hold is not None else fc.MOUTH_HOLD
+        cue[2][4] = value
+        holds_used.append(value)
+    event_list.sort(key=lambda r: r[0])
     # `events_from_tracks` reports the shape of its own thinning here and `export_face` prints it, so
     # the solver reports the equivalent numbers for its own layer rather than a missing key.  The
     # solver has no per-morph gap to thin - that is what the duration model and the minimum event
     # length already do - so `thinned` counts the events the merge pass removed.
     span_min = frames / fc.DST_FPS / 60.0
     info["context"] = ctx.notes()
-    info.update({"mouth_events": len(mouth_events), "expression_events": len(expression_events),
+    info.update({"mouth_events": len(mouth_events),
                  "frames": frames, "visemes_used": sorted({e["viseme"] for e in mouth_events}),
                  "shapes_used": sorted({e["shape"] for e in mouth_events}),
                  "mouth_rate_hz": round(len(mouth_events) / max(1e-9, frames / fc.DST_FPS), 4),
                  "thinned": max(0, len(rows) - len(mouth_events)),
+                 "holds": dict(collections.Counter(holds_used)),
                  "density": (len(event_list) / span_min) if span_min else 0.0})
     return event_list, unmapped, info

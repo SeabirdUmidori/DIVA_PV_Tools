@@ -59,19 +59,43 @@ def bundled_path():
     return p if os.path.isfile(p) else ""
 
 
+TIMEOUT = 90            # seconds per socket operation: connect AND every chunk read
+RETRIES = 3             # a slow route can stall mid-stream; start over rather than give up
+
+
 def download(cancel=None, progress=None):
     """Stream the pinned zip to a temp file; return (path, total_bytes).
 
     `progress(done, total)` is called per chunk (total is the Content-Length, 0 if the server
     hid it); `cancel()` is polled per chunk, and a true answer deletes the partial file and
-    raises.  The caller owns the temp file and must pass it to `install()` or delete it.
+    raises.  A stalled or dropped connection is retried up to `RETRIES` times - each attempt
+    starts the file over, so a partial download never reaches `install()`.  The caller owns the
+    temp file and must pass it to `install()` or delete it.
     """
+    import time
+    url = source_url()
+    last = None
+    for attempt in range(1, RETRIES + 1):
+        try:
+            return _download_once(cancel, progress)
+        except FetchError:
+            raise                       # a cancel is a decision, not a network fault
+        except OSError as exc:          # socket.timeout is an OSError since 3.10: one catch covers all
+            last = exc
+            if attempt >= RETRIES or (cancel is not None and cancel()):
+                break
+            if progress is not None:
+                progress(0, 0)          # the caller can show the retry on its line
+            time.sleep(2 * attempt)
+    raise FetchError("the download failed after %d attempts reaching %s (%s) - a manual ffmpeg "
+                     "path, $MMD2DIVA_FFMPEG, or an ffmpeg on PATH all work without it"
+                     % (RETRIES, url, last))
+
+
+def _download_once(cancel, progress):
     url = source_url()
     req = urllib.request.Request(url, headers={"User-Agent": "diva_pv_tools"})
-    try:
-        resp = urllib.request.urlopen(req, timeout=30)
-    except OSError as exc:
-        raise FetchError("could not reach %s (%s)" % (url, exc))
+    resp = urllib.request.urlopen(req, timeout=TIMEOUT)   # OSError out of here: the caller retries
     try:
         total = int(resp.headers.get("Content-Length") or 0)
     except ValueError:
@@ -100,7 +124,7 @@ def download(cancel=None, progress=None):
             pass
     if total and done != total:
         _drop(temp)
-        raise FetchError("the download ended short (%d of %d bytes)" % (done, total))
+        raise OSError("the download ended short (%d of %d bytes)" % (done, total))
     return temp, done
 
 

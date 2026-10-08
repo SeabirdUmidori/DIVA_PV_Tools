@@ -1,0 +1,77 @@
+{
+  "_note": "DIVA EXPRESSION <- the MMD morph weights that arm that face.  Each rule is a CONDITION on the dance's morph weights, not a blend to match: a face is worn while its condition holds.  The table is data - edit it and the exporter follows.",
+  "_how_it_works": {
+    "all": "every rule is `all`: a list of requirements and ALL of them must hold.  A requirement is {\"morph\": name, \"min\": X} (weight >= X), {\"morph\": name, \"gt\": X} (weight > X), or {\"any\": [ ...requirements... ]} where one of them is enough.",
+    "not_zero": "`gt: 0` means \"not zero\".  It is read as `weight > 0 + epsilon`, so an interpolation tail or a rounding crumb cannot arm a face; set `epsilon` to 0 to make it literal.",
+    "winner": "`tier` is the priority and it comes first: while any face in a higher tier is satisfied, no lower tier can take over.  1 is the highest.  Within one tier: highest `priority`, then the largest sum of thresholds, then the most requirements, then the earlier rule in this file.",
+    "release": "when nothing is satisfied, the next `bridge_s` seconds are checked first: if another face arms within them, the outgoing face is held across the gap so the dance goes A -> B instead of A -> rest -> B.  A longer silence writes EXPRESSION(chara, 21, 100, 0), the clear face measured at idx 21.",
+    "min_hold_s": "a winner must stay the winner this long before a cue is written, so a two-frame wobble does not become two cues.",
+    "confidence": "`probe` = watched in game through the expression probe; `guess` = inferred, needs a probe run first.  Nothing is emitted from a rule below `min_confidence`."
+  },
+  "_source": "In-game probe of PV 8331 (mod AAA).  The id numbering was confirmed at the same time: EXP_SLOTS[i] matched the observed face for 21 of 21 readable indices 0..22.  The conditions and the tiers below are the ones the user wrote out.",
+  "_tiers": {
+    "1": "eyelid: the winks and the shut eye",
+    "2": "a named expression with its own second condition (eyelid or anger level)",
+    "3": "a single morph being engaged",
+    "4": "the eyelid at a low weight only"
+  },
+  "_open_items": [
+    "idx 4, 6 and 23..41 were never observed, so they have no rule.",
+    "`MIK_FACE_CLARIFYING` (まばたき >= 0.1) and `MIK_FACE_GENTLE` (まばたき >= 0.2) are tier 4 and are armed by the eyelid morph, which blinks constantly - they will fire on ordinary blinking whenever nothing higher is satisfied.",
+    "idx 2, 15 and 20 are `guess` and are not emitted."
+  ],
+  "settings": {
+    "epsilon": 0.001,
+    "min_hold_s": 0.2,
+    "bridge_s": 0.4,
+    "min_confidence": "probe",
+    "intensity": 100,
+    "hold": 1000
+  },
+  "rules": [
+    {"idx": 42, "tier": 1, "name": "MIK_FACE_WINK_L", "confidence": "probe", "from": "ウィンク不为0",
+     "all": [{"morph": "ウィンク", "gt": 0}]},
+    {"idx": 43, "tier": 1, "name": "MIK_FACE_WINK_R", "confidence": "probe", "from": "ウィンク右不为0",
+     "all": [{"morph": "ウィンク右", "gt": 0}]},
+    {"idx": 22, "tier": 1, "name": "MIK_FACE_CLOSE", "confidence": "probe", "from": "まばたき>=1",
+     "all": [{"morph": "まばたき", "min": 1.0}]},
+
+    {"idx": 5, "tier": 2, "name": "MIK_FACE_ADMIRATION", "confidence": "probe", "from": "真面目不为0 + まばたき>=0.2",
+     "all": [{"morph": "真面目", "gt": 0}, {"morph": "まばたき", "min": 0.2}]},
+    {"idx": 8, "tier": 2, "name": "MIK_FACE_DAZZLING", "confidence": "probe", "from": "にやり或にやり２不为0 + まばたき>=0.2",
+     "all": [{"any": [{"morph": "にやり", "gt": 0}, {"morph": "にやり２", "gt": 0}]},
+             {"morph": "まばたき", "min": 0.2}]},
+    {"idx": 9, "tier": 2, "name": "MIK_FACE_LASCIVIOUS", "confidence": "probe", "from": "怒り不为0 + まばたき>=0.2",
+     "all": [{"morph": "怒り", "gt": 0}, {"morph": "まばたき", "min": 0.2}]},
+    {"idx": 13, "tier": 2, "name": "MIK_FACE_NAGASI", "confidence": "probe", "from": "怒り>=0.2 + まばたき>=0.2",
+     "all": [{"morph": "怒り", "min": 0.2}, {"morph": "まばたき", "min": 0.2}]},
+    {"idx": 16, "tier": 2, "name": "MIK_FACE_UTURO", "confidence": "probe", "from": "まばたき或なごみ>=0.5 + 困る>=0.2",
+     "all": [{"any": [{"morph": "まばたき", "min": 0.5}, {"morph": "なごみ", "min": 0.5}]},
+             {"morph": "困る", "min": 0.2}]},
+    {"idx": 17, "tier": 2, "name": "MIK_FACE_OMOU", "confidence": "probe", "from": "困る不为0 + まばたき>=0.2",
+     "all": [{"morph": "困る", "gt": 0}, {"morph": "まばたき", "min": 0.2}]},
+    {"idx": 18, "tier": 2, "name": "MIK_FACE_SETUNA", "confidence": "probe", "from": "困る不为0 + まばたき>=0.4",
+     "all": [{"morph": "困る", "gt": 0}, {"morph": "まばたき", "min": 0.4}]},
+
+    {"idx": 0, "tier": 3, "name": "MIK_FACE_SAD", "confidence": "probe", "from": "困る不为0",
+     "all": [{"morph": "困る", "gt": 0}]},
+    {"idx": 1, "tier": 3, "name": "MIK_FACE_LAUGH", "confidence": "probe", "from": "笑い为1",
+     "all": [{"morph": "笑い", "min": 1.0}]},
+    {"idx": 7, "tier": 3, "name": "MIK_FACE_SETTLED", "confidence": "probe", "from": "にやり不为0",
+     "all": [{"morph": "にやり", "gt": 0}]},
+    {"idx": 10, "tier": 3, "name": "MIK_FACE_STRONG", "confidence": "probe", "from": "怒り不为0",
+     "all": [{"morph": "怒り", "gt": 0}]},
+    {"idx": 2, "tier": 3, "name": "MIK_FACE_CRY", "confidence": "guess", "from": "はぅ不为0",
+     "all": [{"morph": "はぅ", "gt": 0}]},
+    {"idx": 15, "tier": 3, "name": "MIK_FACE_KIRI", "confidence": "guess", "from": "怒り不为0 + にやり不为0",
+     "all": [{"morph": "怒り", "gt": 0}, {"morph": "にやり", "gt": 0}]},
+    {"idx": 20, "tier": 3, "name": "MIK_FACE_YARU", "confidence": "guess", "from": "怒り不为0 + 笑い不为0",
+     "all": [{"morph": "怒り", "gt": 0}, {"morph": "笑い", "gt": 0}]},
+
+    {"idx": 11, "tier": 4, "name": "MIK_FACE_CLARIFYING", "confidence": "probe", "from": "まばたき>=0.1",
+     "all": [{"morph": "まばたき", "min": 0.1}]},
+    {"idx": 12, "tier": 4, "name": "MIK_FACE_GENTLE", "confidence": "probe", "from": "まばたき>=0.2",
+     "all": [{"morph": "まばたき", "min": 0.2}]}
+  ],
+  "neutral": {"idx": 21, "name": "MIK_FACE_RESET"}
+}

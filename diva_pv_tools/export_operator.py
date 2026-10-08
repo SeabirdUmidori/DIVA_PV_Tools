@@ -103,7 +103,8 @@ class DIVA_PV_OT_export_motset(tb.TaskOperator, ExportHelper):
         return task_ops.MotionExportOperation(
             context, armature=armature,
             options={"filepath": out, "decimals": decimals,
-                     "scale_keys": scale_keys})
+                     "scale_keys": scale_keys,
+                     "overwrite": getattr(context.scene, "diva_mot_overwrite", False)})
 
     def task_finish(self, context, task, operation):
         task_ops.log_benchmark(operation)

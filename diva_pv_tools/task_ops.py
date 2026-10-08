@@ -11,6 +11,7 @@ assertion instead of pulling anything in.  Reach editing lives in `motion_refine
 the *action*, sized from the rig's own bones.
 """
 import gc
+import json
 import math
 import os
 import time
@@ -22,11 +23,48 @@ from .operation import (UNIT_BUDGET, OffThread, Operation, _unbudgeted,  # noqa:
                         log_benchmark, run_to_completion)
 
 # ---------------------------------------------------------------------------- VMD import
+def _build_stamp():
+    """Which copy of the add-on actually ran this export.
+
+    Stamped into every audit beside the script, because the one failure mode this project kept
+    hitting is not a code defect at all: Blender **does not reload an already-enabled add-on's
+    modules** when the files on disk change, so a session started before an update keeps running the
+    old logic while the panel shows the new version. Two rounds of "install it and export again"
+    therefore changed nothing, and the only way to tell was to compare the output's bytes against a
+    fresh export. A timestamped build id in the artefact makes that a one-line check.
+    """
+    import time
+    try:
+        from . import BUILD_ID, bl_info
+        version = ".".join(str(v) for v in bl_info.get("version", ()))
+    except Exception:                                  # pragma: no cover - never fatal
+        BUILD_ID, version = "unknown", "unknown"
+    return {"build_id": BUILD_ID, "version": version,
+            "written": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "note": ("the add-on's modules are only loaded once per Blender session, so a build id "
+                     "that is older than the version on disk means an export ran from a session "
+                     "started before the update")}
+
+
+# A master bone and the bones that inherit from it in MMD.  A `.vmd` stores each bone's *world*
+# rotation, and a model that has an eye master parent puts all of the eye movement there while the
+# per-eye bones keep a single placeholder key - so a rig with only the per-eye bones receives
+# nothing.  Measured on the reference dances: `両目` carries 253..604 real keys (up to 15.5 deg of
+# eye rotation) while `左目` and `右目` have exactly **one** key each, and the shipped `Import Rig`
+# has `左目`/`右目` parented to `頭` with no `両目` at all.  Routing the master's rotation onto the
+# per-eye bones reproduces the inheritance the source model had, without editing the rig template or
+# inventing a bone the export skeleton has no slot for.
+BONE_INHERITED_BY = {
+    "両目": ("左目", "右目"),
+    "両手首": ("左手首", "右手首"),
+}
+
+
 class VmdImportResult(object):
     """What an import produced, in the one shape the operator and the tests both read."""
 
     __slots__ = ("action", "frames", "bones", "records", "morphs", "ik_curves", "unmapped",
-                 "dialect", "path")
+                 "dialect", "path", "inherited", "eye_residual")
 
     def __init__(self, **kw):
         for slot in self.__slots__:
@@ -207,28 +245,78 @@ class VmdImportOperation(Operation):
         The count is what makes the progress bar determinate from here on: keys times curves is known
         exactly once the bone set is known, so there is no reason to show an indeterminate bar for the
         ninety percent of the operation that is the writing.
+
+        A track that matches no bone is not written off yet: if it is a bone other bones *inherit*
+        from (see `BONE_INHERITED_BY`), its rotation goes onto those bones instead.  That is the one case
+        where "the rig has no such bone" and "the motion has nothing for the rig" are different
+        statements, and it is the case that leaves an eye looking somewhere and never coming back.
         """
         self.mapper = _bone_mapper(self.rig)
         self.matched = []
         self.unmapped = []
+        self.masters = {}          # master track -> [(pose-bone name, pose bone), ...]
+        self.inherited = {}        # master track -> [pose-bone names it was routed onto]
+        self.inherit_into = {}     # per-eye track -> the master whose rotation drives it
         for name in self.order:
             pb = self.mapper.get(name)
-            if pb is None:
+            if pb is not None:
+                self.matched.append((name, pb))
+                continue
+            targets = [(n, self.mapper.get(n)) for n in BONE_INHERITED_BY.get(name, ())]
+            targets = [(n, pb2) for (n, pb2) in targets if pb2 is not None]
+            if not targets:
                 self.unmapped.append(name)
                 continue
-            self.matched.append((name, pb))
+            # The master has no bone to drive, so it is not part of `matched`; its track is written
+            # by a separate pass onto the bones that inherit from it - but only onto those the file
+            # does not animate itself.
+            self.masters[name] = targets
+            routed = []
+            for child_name, _child_pb in targets:
+                if self._is_placeholder(child_name):
+                    self.inherit_into[child_name] = name
+                    routed.append(child_name)
+            self.inherited[name] = routed
         total = 0
         for name, _pb in self.matched:
             total += 7 * self.tracks[name]["count"]
         self.state["key_total"] = total
         if self.task is not None:
             self.task.set_total(total)
-            self.task.note("%d of %d track(s) matched, %d key(s) to write"
-                           % (len(self.matched), len(self.order), total))
-        if not self.matched:
+            note = ("%d of %d track(s) matched, %d key(s) to write"
+                    % (len(self.matched), len(self.order), total))
+            if self.inherited:
+                note += "; %s" % ", ".join(
+                    "%s drives %s" % (master, "+".join(kids)) if kids
+                    else "%s has no bone on this rig" % master
+                    for master, kids in sorted(self.inherited.items()))
+            self.task.note(note)
+        if not self.matched and not self.masters:
             raise ValueError("none of the %d track(s) in %s match a bone on %s"
                              % (len(self.order), os.path.basename(self.path), self.rig.name))
         yield None
+
+    def _is_placeholder(self, track_name):
+        """Is this track just the exporter's single zero key rather than a real animation?
+
+        MMD exporters write one identity key at frame 1 (or 0) for every bone, and a model whose eye
+        master bone owns the movement leaves exactly that on the per-eye bones - measured on the
+        reference dances, `左目` and `右目` carry **one** key each while `両目` carries 253..604 real
+        ones.  Distinguishing the two is what decides whether the master's rotation should take over:
+        a track with its own real animation is kept, a placeholder is not.
+        """
+        track = self.tracks.get(track_name)
+        if not track:
+            return True
+        frames = track["frames"]
+        if len(frames) > 1:
+            return False
+        for rot in track["rot"]:
+            if abs(float(rot[3])) < 0.9999:
+                return False
+            if any(abs(float(v)) > 1e-4 for v in rot[:3]):
+                return False
+        return True
 
     def curves_stage(self):
         """Create the action and every F-curve, before a single key is written.
@@ -247,6 +335,7 @@ class VmdImportOperation(Operation):
         self._created_action = action
         self.track_action(action)
         curves = {}
+        self._curve_names = set()
         for name, pb in self.matched:
             pb.rotation_mode = 'QUATERNION'
             path = 'pose.bones["%s"]' % pb.name
@@ -255,6 +344,22 @@ class VmdImportOperation(Operation):
                 "rot": [_get_or_create(action, path + ".rotation_quaternion", i, pb.name)
                         for i in range(4)],
             }
+        # A master bone's rotation lands on the bones that inherit from it, so those curves have to
+        # exist before any key is written.  Created here rather than lazily inside the write pass for
+        # the same reason as everything else in this stage: a curve that cannot be created is a
+        # rig problem and is worth reporting before the long write begins.
+        for master in sorted(self.masters):
+            for child_name, child_pb in self.masters[master]:
+                if child_name in curves:
+                    continue
+                child_pb.rotation_mode = 'QUATERNION'
+                path = 'pose.bones["%s"]' % child_pb.name
+                curves[child_name] = {
+                    "loc": [_get_or_create(action, path + ".location", i, child_pb.name)
+                            for i in range(3)],
+                    "rot": [_get_or_create(action, path + ".rotation_quaternion", i, child_pb.name)
+                            for i in range(4)],
+                }
         self.state["action"] = action
         self.state["curves"] = curves
         # The interpolation controls.  `bezier_for` needs a converter, and a converter needs a pose
@@ -282,7 +387,6 @@ class VmdImportOperation(Operation):
         """
         from . import vmd_tracks as vt
         curves = self.state["curves"]
-        written = [0]
 
         def write_one(name, pb):
             track = self.tracks[name]
@@ -302,11 +406,57 @@ class VmdImportOperation(Operation):
             for axis, fc in enumerate(curves[name]["loc"] + curves[name]["rot"]):
                 fc.keyframe_points.add(count)
                 vt.fill_curve(fc, frames, series[axis], self.state["bezier"], self.state["codes"])
-            written[0] += count * 7
+            self.state["keys_written"] = self.state.get("keys_written", 0) + count * 7
 
         for name, pb in self.matched:
+            self._curve_names.add(pb.name)
+            if pb.name in self.inherit_into:
+                continue          # the master's rotation replaces this placeholder
             yield self.invoke(lambda _n=name, _p=pb: write_one(_n, _p))
-        self.state["keys_written"] = written[0]
+        # A master bone such as `両目` has no bone of its own on the rig, so its rotation is written
+        # onto the bones that inherit from it - MMD's own arrangement, where the per-eye bone carries
+        # no rotation of its own and is simply carried by the master.  This runs after the ordinary
+        # pass so that a bone the file *does* animate keeps its own track, and only a placeholder is
+        # replaced; if the rig ever gains a real master bone, `matched` claims the name and this pass
+        # A master bone such as `両目` has no bone of its own on the rig, so its rotation is written
+        # onto the bones that inherit from it - MMD's own arrangement, where the per-eye bone carries
+        # no rotation of its own and is simply carried by the master.  `self.inherited` already holds
+        # exactly the bones whose own track was a placeholder and which the ordinary pass therefore
+        # skipped, so this pass and that one cannot write the same bone.
+        for master in sorted(self.masters):
+            for child_name in self.inherited.get(master, ()):
+                child_pb = self.mapper.get(child_name)
+                if child_pb is None:
+                    continue
+                yield self.invoke(lambda _m=master, _n=child_name, _p=child_pb: self.inherit_one(
+                    _m, _n, _p))
+
+    def inherit_one(self, master, child_name, child_pb):
+        """Write a master bone's rotation onto one bone that inherits from it.
+
+        Only rotation is routed, and that is deliberate: `両目` in MMD is a rotation-only control
+        whose position never moves (measured: the reference dances carry no position keys on it at
+        all), so writing a location track from it would invent a translation the dance never had.
+
+        The master's world quaternion becomes the *child's* local quaternion.  That is what MMD does:
+        a per-eye bone under a master carries no rotation of its own, so its world orientation is the
+        master's, and `mmd_tools`' `BoneConverter` is exactly the world->local conversion this class
+        already uses for every other bone.  The child's own rest matrix is the converter, so the
+        result is correct for a rig whose eye bone is parented to the head rather than to a master.
+        """
+        from . import vmd_tracks as vt
+        track = self.tracks[master]
+        frames = track["frames"]
+        if len(frames) == 0:
+            return
+        curves = self.state["curves"][child_name]["rot"]
+        converter = vt.converter_for(child_pb, self.scale)
+        quats = vt.convert_rotations(converter, track["rot"])
+        vt.make_compatible(quats)
+        for axis, fc in enumerate(curves):
+            fc.keyframe_points.add(len(frames))
+            vt.fill_curve(fc, frames, quats[:, axis], self.state["bezier"], self.state["codes"])
+        self.state["keys_written"] = self.state.get("keys_written", 0) + len(frames) * 4
 
     def ik_stage(self):
         """The `mmd_ik_toggle` curves, which decide whether the legs bend at all.
@@ -372,6 +522,21 @@ class VmdImportOperation(Operation):
         # but a stage is not" defect this design guards against.
         seen = set()
 
+        # The master tracks' own last frame matters for the report below, so gather it before the
+        # frames set is frozen.
+        self.eye_residual = {}
+        for master, kids in sorted(self.inherited.items()):
+            if not kids:
+                continue
+            track = self.tracks.get(master)
+            if not track or len(track["rot"]) == 0:
+                continue
+            last_rot = track["rot"][-1]
+            w = max(-1.0, min(1.0, abs(float(last_rot[3]))))
+            angle = math.degrees(2.0 * math.acos(w))
+            if angle >= 0.5:
+                self.eye_residual[master] = angle
+
         def gather(name):
             seen.update(int(f) for f in self.tracks[name]["frames"])
 
@@ -386,10 +551,21 @@ class VmdImportOperation(Operation):
         scene.frame_set(scene.frame_end)
         self.context.view_layer.update()
         self.result = VmdImportResult(
-            action=action, frames=frames, bones=len(self.matched), records=len(self.state
-                                                                              ["bone_records"]),
+            action=action, frames=frames, records=len(self.state["bone_records"]),
             morphs=len(self.state.get("morph_records") or []),
-            ik_curves=0, unmapped=self.unmapped, dialect=self.info["dialect"], path=self.path)
+            ik_curves=0, unmapped=self.unmapped, dialect=self.info["dialect"], path=self.path,
+            inherited=dict(self.inherited),
+            eye_residual=dict(self.eye_residual),
+            bones=len(self.matched) + sum(len(v) for v in self.masters.values()))
+        if self.eye_residual and self.task is not None:
+            # Not a defect of this importer: the *file* ends with the eyes turned.  Saying so is the
+            # difference between a user chasing a phantom bug and a user who knows the choreography
+            # leaves the gaze off-centre - the eyes will not come back on their own because the
+            # source never brings them back.
+            self.task.note(
+                "note: this motion ends with the eyes turned (%.1f deg on %s); the source .vmd "
+                "never returns them to centre, so neither does the export"
+                % (max(self.eye_residual.values()), ", ".join(sorted(self.eye_residual))))
         yield None
 
     def stages(self):
@@ -565,8 +741,8 @@ class MotionExportOperation(Operation):
     name = "Export mot set"
 
     # (stage, weight) from the measurement above.
-    WEIGHTS = [("read tables", 0.0004), ("spine mapping", 0.0001), ("collect", 0.7613),
-               ("build keysets", 0.2288), ("write file", 0.0092)]
+    WEIGHTS = [("read tables", 0.0004), ("spine mapping", 0.0001), ("collect", 0.7612),
+               ("build keysets", 0.2287), ("write file", 0.0092)]
 
     def __init__(self, context=None, task=None, armature=None, options=None):
         Operation.__init__(self, context, task, options)
@@ -743,6 +919,7 @@ class CameraExportOperation(Operation):
         self.src = (options or {}).get("src", "")
         self.filepath = (options or {}).get("filepath", "")
         self.min_y = (options or {}).get("min_y")
+        self.y_offset = (options or {}).get("y_offset", 0.0)
         self.stats = None
 
     def prepare(self):
@@ -759,7 +936,8 @@ class CameraExportOperation(Operation):
         # for the 0.8-1.1 s of the call.  `cancel` is checked by the writer before it publishes, so a
         # cancel still leaves an existing .a3da exactly as it was.
         off = OffThread(lambda: camera_core.export_camera_a3da(
-            self.src, self.filepath, min_y=self.min_y, file_name=os.path.basename(self.filepath),
+            self.src, self.filepath, min_y=self.min_y, y_offset=self.y_offset,
+            file_name=os.path.basename(self.filepath),
             cancel=lambda: off.stop[0]), "camera-export", on_cancel=self.cancel_requested)
         yield from off.units()
         self.stats = off.result
@@ -810,6 +988,8 @@ class AudioExportOperation(Operation):
         self.channels = int((options or {}).get("channels", 2))
         self.quality = (options or {}).get("quality")
         self.normalize = (options or {}).get("normalize")
+        # the ffmpeg the UI probe settled on (manual path included); None = the core's own search
+        self.ffmpeg = (options or {}).get("ffmpeg")
         self.overwrite = bool((options or {}).get("overwrite", False))
         self.info = None
         self.probe_info = None
@@ -836,7 +1016,7 @@ class AudioExportOperation(Operation):
 
         def probe():
             try:
-                self.source_info = audio_ops.source_stream_info(self.src)
+                self.source_info = audio_ops.source_stream_info(self.src, ffmpeg=self.ffmpeg)
             except Exception:                                   # noqa: BLE001 - reported as unknown
                 self.source_info = {}
 
@@ -859,6 +1039,7 @@ class AudioExportOperation(Operation):
         off = OffThread(lambda: audio_ops.convert(self.src, self.filepath, channels=self.channels,
                                                  quality=self.quality,
                                                  normalize_peak=self.normalize,
+                                                 ffmpeg=self.ffmpeg,
                                                  overwrite=self.overwrite,
                                                  cancel=lambda: off.stop[0]),
                         "audio-encode", on_cancel=self.cancel_requested)
@@ -895,24 +1076,37 @@ class AudioExportOperation(Operation):
 
 
 class FaceExportOperation(Operation):
-    """The expression/mouth splice, measured at 5.7 s on the real pair (1.2 match + 4.5 export).
+    """The mouth/blink splice, measured at 5.7 s on the real pair (1.2 match + 4.5 export).
 
-    Three stages, in the order the pipeline already had them, and each is a unit the scheduler can
-    measure: reading the dance's morph track and matching it against the slot tables; building the
-    plan; and the export itself, which decodes the base script, decides every event, splices, encodes,
-    re-reads the result and validates it against every rule a shipping script obeys.  That last stage
-    is one unit on purpose - it publishes only after the validation passes, and a half-validated
-    publish is the thing it exists to prevent.
+    Four stages: matching the dance's morph track against the mouth tables; building the plan; the
+    export itself, which decodes the base script, decides every mouth cue and both ways of writing
+    the blink, splices, encodes, re-reads the result and validates it against every rule a shipping
+    script obeys; and the **audit**, which is deliberately last and deliberately unable to fail the
+    export.
 
-    Expression and mouth behaviour is not touched by this class.  It calls the same `morph_core` and
-    `face_core` entry points the operator called before, with the same arguments; the only difference
-    is that the caller can now watch it and stop it.
+    The audit is the wider layer.  It measures what each source morph actually deforms when a source
+    PMX is available, classifies it, maps it - including the MMD expression morphs this exporter does
+    *not* transplant - and writes a per-morph report whose coverage proves `silent drops = 0`: every
+    morph the motion animates appears exactly once with a grade and a reason.  It runs *after* the
+    splice has been validated and published, and a failure inside it is recorded on the task rather
+    than raised, because an audit that can block an otherwise-correct export would just be deleted by
+    the next person who hit it.
+
+    The splice itself is untouched: it calls the same `morph_core` and `face_core` entry points with
+    the same arguments, so the accepted output cannot change because of this stage.
     """
 
     name = "Export expressions"
     # Measured on a full-length reference dance against a stock base script: match 1.18 s, plan
-    # 0.00 s, export 4.52 s - the splice dominates, hence the weights below.
-    WEIGHTS = [("match morphs", 0.207), ("build plan", 0.001), ("splice and validate", 0.792)]
+    # 0.00 s, export 4.52 s - the splice dominates, hence the weights below.  The audit is a few
+    # hundred milliseconds on a 97-morph model, and the eye motion is smaller still.
+    WEIGHTS = [
+        ("match morphs", 0.172),
+        ("build plan", 0.001),
+        ("splice and validate", 0.677),
+        ("morph audit", 0.15),
+    ]
+
     def __init__(self, context=None, task=None, options=None):
         Operation.__init__(self, context, task, options)
         self.src = (options or {}).get("src", "")
@@ -922,21 +1116,45 @@ class FaceExportOperation(Operation):
         self.chara = int((options or {}).get("chara", 0))
         self.replace = bool((options or {}).get("replace", True))
         self.overwrite = bool((options or {}).get("overwrite", False))
-        self.min_gap_ms = (options or {}).get("min_gap_ms", 0)
-        self.solver = bool((options or {}).get("solver", True))
-        self.approx = bool((options or {}).get("approx", False))
+        # Fixed, not options - each keeps the value it had as a panel default.
+        # solver on: the sequence model is what makes the mouth move on a real dance at all.  The
+        # edge path transcribes the .vmd's own thresholds, and on the material this was reported
+        # against that reads as a mouth that barely moves.
+        self.min_gap_ms = 0
+        self.solver = True
+        self.approx = True
         self.rom_root = (options or {}).get("rom_root")
+        self.source_pmx = (options or {}).get("source_pmx") or ""
+        self.audit_path = (options or {}).get("audit_path") or ""
         self.result = None
         self.plan = None
         self.stats = None
         self.explain = []
+        self.audit = None
+        # the eye-motion side output: where it landed, or why it did not
 
     def prepare(self):
         from . import morph_core
+        # Warn before doing anything at all when this session predates the files on disk: Blender
+        # never re-imports an add-on's modules, so a half-old session calls new functions with old
+        # arguments and the resulting error points at the new code instead of at the session.
+        try:
+            from . import stale_build
+            loaded, on_disk, where = stale_build()
+            if loaded != on_disk:
+                self.warnings.append(
+                    "this Blender session loaded the add-on before the files changed "
+                    "(running build %s, %s on disk) - restart Blender before trusting this export"
+                    % (loaded, on_disk))
+                print("Face export: WARNING - stale add-on session: running build %s, %s on disk (%s)"
+                      % (loaded, on_disk, where))
+        except Exception:
+            pass                       # the check is a courtesy; it must never block an export
         if not self.src or not os.path.isfile(self.src):
             raise ValueError("no dance .vmd was chosen")
-        if not self.base or not os.path.isfile(self.base):
-            raise ValueError("no base PV script was chosen")
+        # an empty base is the generated-scaffold mode; the exporter creates one beside the output
+        if self.base and not os.path.isfile(self.base):
+            raise ValueError("no base PV script at %s" % self.base)
         if not self.filepath:
             raise ValueError("no output path was chosen")
         if os.path.exists(self.filepath) and not self.overwrite:
@@ -944,7 +1162,7 @@ class FaceExportOperation(Operation):
         code = (self.options.get("code") or morph_core.CHARA).upper()[:3]
         if code != morph_core.CHARA:
             morph_core.CHARA = code
-        self.unit_total = 3
+        self.unit_total = 4
 
     def rom_stage(self):
         """Point the slot tables at the rom root the caller found, if any.
@@ -993,14 +1211,63 @@ class FaceExportOperation(Operation):
         # script the user pointed at is never left half-replaced.
         off = OffThread(lambda: face_core.export_face(
             base, src, out, plan, game, chara=chara, replace=replace, overwrite=overwrite,
-            min_gap_ms=gap, solver=solver, explain=explain, cancel=lambda: off.stop[0]),
+            min_gap_ms=gap, solver=solver, explain=explain,
+            cancel=lambda: off.stop[0]),
             "face-export", on_cancel=self.cancel_requested)
         yield from off.units()
         self.stats = off.result
 
+    def audit_stage(self):
+        """Measure, classify and map every morph, then write the report - without risking the export.
+
+        Runs last and swallows its own failures into `self.audit["error"]`: the script has already
+        been validated and published by the time this runs, and an audit that could turn a good
+        export into a failed task is an audit nobody would keep.  A *genuine* incompleteness - a
+        morph the motion animates that the report does not mention - still surfaces, because
+        `MorphAudit.verify` raises and the message lands in the report and the task's warnings.
+        """
+        from . import morph_core, morph_pipeline
+        src, pmx = self.src, self.source_pmx
+        alias_path = self.alias
+        out_path = self.audit_path
+
+        def body():
+            aliases = {}
+            try:
+                for table in ("mouth", "expression", "mouth_approx", "expression_approx"):
+                    for k, v in morph_core.tables()[table].items():
+                        aliases.setdefault(k, v)
+            except Exception:
+                pass
+            if alias_path and os.path.isfile(alias_path):
+                aliases.update(morph_core.read_alias_answers(alias_path))
+            chosen = pmx or morph_pipeline.find_source_pmx(src)
+            result = morph_pipeline.run(src, pmx_path=chosen, alias=aliases)
+            report = result.report
+            report["export"] = dict(self.stats or {})
+            report["lane_plan"] = morph_pipeline.lane_plan(result)
+            report["build"] = _build_stamp()
+            if out_path:
+                directory = os.path.dirname(out_path)
+                if directory:
+                    os.makedirs(directory, exist_ok=True)
+                with open(out_path, "w", encoding="utf-8", newline="\n") as fh:
+                    json.dump(report, fh, ensure_ascii=False, indent=1)
+            return report
+
+        off = OffThread(body, "morph-audit", on_cancel=self.cancel_requested)
+        try:
+            yield from off.units()
+            self.audit = off.result
+        except Exception as exc:
+            # the script is already published and validated; an audit failure is reported, not raised
+            self.audit = {"error": "%s: %s" % (type(exc).__name__, exc)}
+            self.warnings.append("the morph audit could not be produced: %s" % exc)
+
     def stages(self):
         return [(name, weight, self.unit(body)) for (name, weight), body in zip(
-            self.WEIGHTS, (self.match_stage, self.plan_stage, self.export_stage))]
+            self.WEIGHTS, (self.match_stage, self.plan_stage, self.export_stage,
+                           self.audit_stage))]
 
     def commit(self):
         self._committed = True
@@ -1008,9 +1275,10 @@ class FaceExportOperation(Operation):
     def describe(self):
         if self.stats is None:
             return "nothing was written"
-        return ("wrote %s: %d record(s), %d mouth + %d expression cue(s), validated against every "
-                "shipping-script rule" % (os.path.basename(self.stats["out"]), self.stats["records"],
-                                          self.stats["mouth"], self.stats["expression"]))
+        return ("wrote %s: %d record(s), %d mouth + %d expression cue(s) (%d blink), validated "
+                "against every shipping-script rule"
+                % (os.path.basename(self.stats["out"]), self.stats["records"], self.stats["mouth"],
+                   self.stats["expression"], self.stats.get("blink_cues", 0)))
 
 
 class FFmpegFetchOperation(Operation):

@@ -21,9 +21,10 @@ frames at 60 fps) short.
 What the container has to look like (measured off SEGA's own songs):
 Ogg/Vorbis I, version 0, 44100 Hz, blocksize byte 0xB8 (256/2048), framing bit 1, and the
 songs are 4 channels (quad): SEGA puts an independent vocal mix in the two rear channels
-(pv_249 rear RMS ~2010 counts, correlation ~0.00 with the front pair, i.e. real separate audio).
-Shipped mods prove the loader is relaxed about the rest - a working 2-channel song (pv_643), a working quad song with dead-silent rear channels (a shipped quad mod pv_8331) and
-working files whose vendor string, ENCODER comment and id-header bitrates all differ from SEGA's.
+(a shipped quad's rear RMS ~2010 counts, correlation ~0.00 with the front pair, i.e. real separate
+audio).  Shipped mods prove the loader is relaxed about the rest - an installed 2-channel mod, a mod
+whose quad rear channels are dead silent, and working files whose vendor string, ENCODER comment and
+id-header bitrates all differ from SEGA's.
 So: rate, channel count and length are the fields we enforce; vendor/ENCODER/nominal bitrate are
 cosmetic and are reported, not faked.
 
@@ -364,11 +365,12 @@ def find_ffmpeg(extra_paths=(), encoder="libvorbis", required=True):
     probed = []
     candidates = []
     env = os.environ.get("MMD2DIVA_FFMPEG")
-    # Order matters: what the user set, then what PATH offers, then the binary this add-on
-    # fetched into `bin/` (or a user green-installed there), then the last-resort known
-    # install locations.  A shipped add-on needs none of the last group - they are a
-    # convenience for manual installs that are not on PATH, not a dependency.
-    for path in ([env], extra_paths, [shutil.which("ffmpeg") or ""], [BUNDLED_FFMPEG],
+    # Order matters: an explicitly passed path (the panel's FFmpeg field) first - it is the
+    # user's intent for *this* file; then what the environment offers; then PATH; then the
+    # binary this add-on fetched into `bin/` (or a user green-installed there); then the
+    # last-resort known install locations.  A shipped add-on needs none of the last group -
+    # they are a convenience for manual installs that are not on PATH, not a dependency.
+    for path in (list(extra_paths), [env], [shutil.which("ffmpeg") or ""], [BUNDLED_FFMPEG],
                  list(FFMPEG_CANDIDATES)):
         for item in path:
             if item and item not in candidates:

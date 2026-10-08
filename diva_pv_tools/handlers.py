@@ -36,9 +36,10 @@ def _is_ours(handler, name):
 
 
 def register_frame_handler():
-    # A .blend comes back holding an inert function that has *our* name and *our* module string, and it
-    # cannot run; left in the list it would make the check below think we are already registered, which
-    # is how a frozen pole survives.  So drop the stale copies that claim our module, keeping
+    # A .blend comes back holding an inert function that has this module's name and module string,
+    # and it cannot run; left in the list it would make the check below look as though the add-on is
+    # already registered, which is how a frozen pole survives.  So drop the stale copies that claim
+    # this module, keeping
     # this import's own function object - and leave other add-ons' handlers alone, whatever they are
     # called (the load_post list really does hold another add-on's `load_post_handler`).
     bpy.app.handlers.frame_change_post[:] = [

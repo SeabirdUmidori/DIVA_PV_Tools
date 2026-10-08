@@ -2,15 +2,17 @@
  "_note": "MMD morph name -> DIVA face target.  This file is data, not code: it is the only place the correspondence lives, and the add-on reads it at export time.",
  "_format": "{\"mouth\": {name: DIVA mouth name}, \"expression\": {...}, \"mouth_approx\": {...}, \"expression_approx\": {...}, \"junk\": [[regex, reason], ...]}.  Keys beginning with _ are documentation and are ignored.  Values are DIVA morph names; the exporter resolves them to the numeric shape/slot through expression_slots.json and refuses any target that is not in diva_face_targets.json (i.e. not present in a SEGA shipping script).",
  "_matching_order": [
+  "the user's own worklist answers (checked first, and they win over everything below)",
   "exact DIVA name (after normalisation)",
-  "alias table (this file)",
-  "the user's own worklist answers (win over everything here)",
+  "alias table (this file): `mouth`",
+  "approximation table: `mouth_approx`",
+  "the junk filter (a name that is plumbing, not a morph)",
   "keyword tier from diva_face_targets.json",
   "legal DIVA fallback",
-  "report as unresolved"
+  "report as ambiguous with ranked suggestions, or unresolved"
  ],
  "_normalise": "NFKC, casefold, middle dot -> long mark, strip combining marks, collapse whitespace; '_', '-', '.', '/', ' ' and '　' are dropped before lookup, so mouth_open, Mouth-Open and mouth open are one key.",
- "_verified": "Every target checked against diva_face_targets.json at build time: 36 mouth and 43 expression targets, all of them present in SEGA's own shipped PV scripts.",
+ "_verified": "Every target checked against diva_face_targets.json at build time: the mouth and expression targets are all present in SEGA shipped PV scripts.  The mouth side avoids the *_OLD assets (face_retarget.Model._prefer) and holds only morphs whose MMD vertex-deformation category is the mouth - checked against the PMX panel byte measured from real models, then against data/mmd_morph_catalog.json, then the name's own wording.",
  "mouth": {
   "あ": "MIK_KUCHI_A",
   "ア": "MIK_KUCHI_A",
@@ -78,12 +80,6 @@
   "close_mouth": "MIK_KUCHI_RESET",
   "mouth_closed": "MIK_KUCHI_RESET",
   "closemouth": "MIK_KUCHI_RESET",
-  "∧": "MIK_KUCHI_NIYA",
-  "にやり": "MIK_KUCHI_NIYA",
-  "ニヤリ": "MIK_KUCHI_NIYA",
-  "ﾆﾔﾘ": "MIK_KUCHI_NIYA",
-  "にや": "MIK_KUCHI_NIYA",
-  "smirk": "MIK_KUCHI_NIYA",
   "にっこり口": "MIK_KUCHI_SMILE",
   "にこり口": "MIK_KUCHI_SMILE",
   "笑い口": "MIK_KUCHI_SMILE",
@@ -131,10 +127,10 @@
   "mouth_neutral": "MIK_KUCHI_NEUTRAL",
   "ニュートラル口": "MIK_KUCHI_NEUTRAL",
   "平常口": "MIK_KUCHI_NEUTRAL",
-  "普通の口": "MIK_KUCHI_NEUTRAL"
+  "普通の口": "MIK_KUCHI_NEUTRAL",
+  "にっこり": "MIK_KUCHI_SMILE"
  },
  "expression": {
-  "にっこり": "MIK_FACE_LAUGH",
   "ニッコリ": "MIK_FACE_LAUGH",
   "にこり": "MIK_FACE_LAUGH",
   "ニコリ": "MIK_FACE_LAUGH",
@@ -352,15 +348,6 @@
   "sleepy": "MIK_FACE_GENTLE"
  },
  "mouth_approx": {
-  "ぺろっ": "MIK_KUCHI_NIYA",
-  "ペロッ": "MIK_KUCHI_NIYA",
-  "ぺろり": "MIK_KUCHI_NIYA",
-  "舌": "MIK_KUCHI_NIYA",
-  "舌出し": "MIK_KUCHI_NIYA",
-  "べー": "MIK_KUCHI_NIYA",
-  "tongue": "MIK_KUCHI_NIYA",
-  "tongue_out": "MIK_KUCHI_NIYA",
-  "pero": "MIK_KUCHI_NIYA",
   "三角口": "MIK_KUCHI_SANKAKU",
   "さんかく口": "MIK_KUCHI_SANKAKU",
   "四角口": "MIK_KUCHI_SHIKAKU",
@@ -372,10 +359,9 @@
   "いーっと": "MIK_KUCHI_I_OLD",
   "食いしばり": "MIK_KUCHI_I_OLD",
   "squint_mouth": "MIK_KUCHI_NEUTRAL",
-  "はぅ": "MIK_KUCHI_NEUTRAL",
-  "はう": "MIK_KUCHI_NEUTRAL",
-  "はぅっ": "MIK_KUCHI_NEUTRAL",
-  "hau": "MIK_KUCHI_NEUTRAL"
+  "口横狭め": "MIK_KUCHI_CHU",
+  "口横広げ": "MIK_KUCHI_SAKEBI",
+  "ω": "MIK_KUCHI_NEKO"
  },
  "expression_approx": {
   "怒り眉": "MIK_FACE_STRONG",
@@ -422,7 +408,12 @@
   "たれ目": "MIK_FACE_GENTLE",
   "タレ目": "MIK_FACE_GENTLE",
   "垂れ目": "MIK_FACE_GENTLE",
-  "droopy_eyes": "MIK_FACE_GENTLE"
+  "droopy_eyes": "MIK_FACE_GENTLE",
+  "はぅ": "MIK_FACE_CRY",
+  "はう": "MIK_FACE_CRY",
+  "はぅっ": "MIK_FACE_CRY",
+  "hau": "MIK_FACE_CRY",
+  "わらい": "MIK_FACE_LAUGH"
  },
  "junk": [
   [
@@ -481,5 +472,12 @@
    "^(目|瞳)(影|の影)$|^影",
    "shadow toggle"
   ]
- ]
+ ],
+ "_tables": {
+  "mouth": "MMD mouth morph -> DIVA mouth shape (MIK_KUCHI_*).  Feeds MOUTH_ANIM; this is what the exporter emits.  A name belongs here ONLY if the morph's vertex-deformation category is the mouth: PMX panel byte 3 as measured from real models, or a mouth_*/tongue family in data/mmd_morph_catalog.json, or a name that literally says mouth (口/くち/mouth/lip).",
+  "mouth_approx": "The near-miss half of ``mouth``: the morph IS a mouth deformation but the name is not the same thing DIVA names (tongue-out -> NIYA).  Same category rule as ``mouth``.",
+  "expression": "MMD expression morph -> DIVA face (MIK_FACE_*).  No longer emits anything - the faces the export writes come from data/expression_rules.json - but this is still the name knowledge the morph audit reports against.  Every name here must NOT be a mouth deformation: brow, eye, gaze, blush, tears, sweat, emotion.",
+  "expression_approx": "The near-miss half of ``expression``: a non-mouth morph mapped to the closest face DIVA has.",
+  "junk": "[[regex, reason]] - names that are plumbing (bones, physics, rig helpers) to ignore."
+ }
 }

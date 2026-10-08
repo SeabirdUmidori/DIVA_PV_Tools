@@ -24,6 +24,11 @@ rendered image, so the shot comes out as edited even though d is a chosen number
 
 Two source shapes turn up and they need different handling:
 
+  orbit   the quaternion-dialect camera record (PMXEditor / current MMD) is an orbit
+          camera: target position + distance carried on the target's attitude.  The UI
+          export path (`cam_json`) reads it exactly; this module's CLI is a development
+          tool and keeps the simpler readings below.
+
   world   the VMD holds a real world transform (a camera 5-25 MMD units up, orbiting 19-75
           units out, i.e. 0.4-2 m high at 1.5-6 m from the singer).  Direct conversion.
   follow  the VMD's transform is not usable as a world path.  One shipped Camera.vmd keeps |y| at

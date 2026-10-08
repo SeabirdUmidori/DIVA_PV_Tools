@@ -1,6 +1,6 @@
 """Sidebar UI: the panels, their operators, the popup option dialogs and the language table.
 
-Written for the fork (SeabirdUmidori).  Nothing here touches the export maths: the motion panel calls the
+This is the fork's UI layer.  Nothing here touches the export maths: the motion panel calls the
 same `exporter.export_motion` the accepted file was produced with, and the camera/audio/morph panels call
 pure-python cores (`camera_core`, `audio_ops`, `morph_core`) that hold no Blender dependency, so each one
 can be - and is - tested headlessly without this file.
@@ -31,6 +31,9 @@ TAB = "DIVA PV"
 
 TEXTS = {
     "en": {
+        'face_solver_tip': "Solve the mouth as one performance (a Viterbi pass over cue statistics measured from SEGA's own scripts) instead of one cue per morph edge",
+        'face_approx_tip': 'Also accept near-miss mouth names - the tier below your worklist answers and above giving up',
+        'face_format_note': 'Script format note: %s',
         "motion": "Motion",
         "camera": "Camera",
         "music": "Music",
@@ -54,13 +57,17 @@ TEXTS = {
         ),
         "morph": "Export expressions (.dsc)",
         "morph_tip": (
-            "Converts the .vmd's morphs into MOUTH_ANIM / EXPRESSION cues of a DIVA "
+            "Converts the .vmd's mouth morphs into the MOUTH_ANIM cues of a DIVA "
             "PV script. Fill the base script above - usually the .dsc already shipped "
             "with this PV. The output keeps its notes, stage cues and timings "
-            "untouched and swaps only the face stream. Names are matched against the "
-            "character's real slot table; anything unresolved is written to the "
+            "untouched and swaps only the mouth stream. Names are matched against the "
+            "character's real mouth table; anything unresolved is written to the "
             "worklist for you to fill, then reused as an alias table next run - never "
-            "guessed. Blink (まばたき) has no DIVA slot, so it is reported, not mapped. "
+            "guessed. MMD expression morphs are NOT transplanted: a DIVA face is a "
+            "held state that carries the eyes, so one that is merely wrong is far more "
+            "visible than a missing one - they land on the worklist instead. The "
+            "eyelids are the exception, and the blink option below chooses how: the "
+            "game's own automatic blink, or the dance's まばたき curve. "
             "Uses the motion .vmd above."
         ),
         "worklist": "Worklist to fill",
@@ -77,6 +84,12 @@ TEXTS = {
             "and re-read and checked before it replaces anything."
         ),
         "camera_min_y": "Minimum camera height (m)",
+        "camera_min_y_on": "Clamp to a minimum height",
+        "camera_min_y_on_tip": ("Lift frames that fall below the height on the slider; "
+                                "leave off to keep every frame exactly where the camera was edited."),
+        "camera_height": "Camera height offset (m)",
+        "camera_height_tip": ("Moves the whole shot up or down - viewpoint and target together, "
+                              "so the framing keeps its angle. Use it to line the export up with the game floor."),
         "camera_min_y_tip": (
             "Frames below this height are lifted to it. 0 exports the path "
             "unchanged."
@@ -105,10 +118,6 @@ TEXTS = {
         "audio_channels": "Channels",
         "audio_quality": "Quality (-q)",
         "audio_normalize": "Normalise peak",
-        "audio_quality_tip": (
-            "Vorbis quality -q (0-10): higher is better and bigger. 6 is "
-            "already transparent; the game only needs Vorbis at 44100 Hz."
-        ),
         "audio_normalize_tip": (
             "Peak target of the output. 0.95 is safe; 0 leaves the level "
             "alone."
@@ -128,16 +137,9 @@ TEXTS = {
             "Used only when \"from the imported motion\" is off; it need not be "
             "loaded into the scene and is never modified."
         ),
-        "face_base": "PV script to take (.dsc)",
         "face_out": "PV script to write (.dsc)",
         "face_menu": "Expression export options",
         "face_code": "Slot table of",
-        "face_code_tip": (
-            "Whose slot table morph names are looked up in: MIK Miku, LEN Len, "
-            "LUK Luka, RIN Rin, KAI Kai, NER Neru, HAK Meiko, SAK Teto, APO, WAN, "
-            "GIR, MON. Match the chart's singer. With the wrong table most names "
-            "resolve to nothing and drop into the worklist."
-        ),
         "face_chara": "Character slot in the script",
         "face_replace": "Replace the script's own face stream",
         "face_solver": "Sequence model",
@@ -145,16 +147,26 @@ TEXTS = {
         "face_gap": "Minimum gap between mouth cues (ms)",
         "face_replace_tip": "Drop the script's own lip sync first, so two mouths do not overlap.",
         "limb_clamp": "Clamp unreachable limb targets",
-        "limb_clamp_tip": (
-            "For moves that stretch an arm or leg past its joint: pulls the hand "
-            "or foot target back along its line, so the engine never locks elbow "
-            "or knee straight. Off by default; turning it on never changes an "
-            "accepted export."
-        ),
+        "limb_clamp_tip": ("For moves that stretch an arm or leg past its joint: pulls the hand or "
+                           "foot target back inside the limb length, so the engine never locks an "
+                           "elbow or knee straight. Off by default, and turning it on never changes "
+                           "an export that already passed its checks."),
+        "face_gap_tip": ("Mouth cues closer together than this are thinned, so the engine gets "
+                         "readable syllables; 0 keeps every cue."),
+        "face_auto_blink": "Automatic blink (the game's own)",
+        "face_auto_blink_tip": ("Let the engine blink by itself instead of following the dance. "
+                                "Ticked, the script carries AUTO_BLINK(0, 1) and the neutral face "
+                                "EXPRESSION(0, 21, 100, 0) - without that face the automatic blink "
+                                "does nothing - and the .vmd's まばたき curve is ignored. Unticked "
+                                "(the default), no AUTO_BLINK is written and the dance's own "
+                                "まばたき drives the eyelids through EXPRESSION(0, 22, 100, 1000) "
+                                "while fully closed and EXPRESSION(0, 21, 100, 0) once it leaves "
+                                "that value. Only a full closure counts as a blink."),
         "face_done": (
             "%s: %d mouth and %d expression cues, %d records over %d frames, replaced "
             "%s"
         ),
+        "face_blink_done": "blink: %s",
         "camera_overwrite": "Allow replacing existing files",
         "mot_overwrite": "Allow replacing an existing file",
         "camera_menu": "Camera export options",
@@ -394,6 +406,10 @@ TEXTS = {
         "task_camera": "Export camera",
         "task_audio": "Export audio",
         "task_face": "Export expressions",
+        "ffmpeg_path": "FFmpeg executable (optional)",
+        "ffmpeg_path_tip": ("Leave empty to find ffmpeg automatically - environment variable, PATH, the "
+                            "add-on's own bin/ folder or the usual install places; point it at your "
+                            "own ffmpeg.exe (built with libvorbis) when automatic finding fails."),
         "fetch_ffmpeg_tip": (
             "Download the pinned official Windows build (about 104 MB) into "
             "the add-on folder. An ffmpeg on PATH or $MMD2DIVA_FFMPEG is still "
@@ -424,6 +440,9 @@ TEXTS = {
         "verify and install": "verify and install",
     },
     "zh_CN": {
+        'face_solver_tip': '把嘴型当作整场演出求解（基于 SEGA 原装脚本指令统计的 Viterbi 路径），而不是每个 morph 边缘各发一条指令',
+        'face_approx_tip': '同时接受近似匹配的口型名——优先级低于你在清单里填写的答案',
+        'face_format_note': '脚本格式提示：%s',
         "motion": "动作",
         "camera": "镜头",
         "music": "音乐",
@@ -441,10 +460,12 @@ TEXTS = {
         ),
         "morph": "导出表情（.dsc）",
         "morph_tip": (
-            "把 .vmd 的表情转成 DIVA PV 脚本的 MOUTH_ANIM / EXPRESSION 指令。先在上方填入基础脚本，一般就是这个 PV "
+            "把 .vmd 的口型 morph 转成 DIVA PV 脚本的 MOUTH_ANIM 指令。先在上方填入基础脚本，一般就是这个 PV "
             "已安装的原装 "
-            ".dsc；输出只替换其中的表情流，音符、舞台与时间轴原样保留。表情名按角色的真实槽表比对，匹配不上的写入待填清单供填写，下次作为别名表复用，绝不猜"
-            "测槽位编号。眨眼（まばたき）在 DIVA 没有槽位，只报告、不映射。输入使用上方填写的动作 .vmd。"
+            ".dsc；输出只替换其中的口型流，音符、舞台与时间轴原样保留。morph 名按角色的真实口型表比对，匹配不上的写入待填清单供填写，"
+            "下次作为别名表复用，绝不猜测槽位编号。**MMD 的表情 morph 不参与移植**：DIVA 的表情是引擎保持的状态且包含眼睛，猜错比缺失更明显，"
+            "它们会出现在待填清单里。眼睑是唯一的例外，用下面的「自动眨眼」选择由谁驱动：游戏自带的自动眨眼，或动作里的 まばたき 曲线。"
+            "输入使用上方填写的动作 .vmd。"
         ),
         "worklist": "待填清单",
         "alias": "alias 答案（可留空）",
@@ -457,6 +478,10 @@ TEXTS = {
             "帧。输出为文本 .a3da，会先读回校验再替换旧文件。"
         ),
         "camera_min_y": "相机最低高度（米）",
+        "camera_min_y_on": "限制最低高度",
+        "camera_min_y_on_tip": "开启后，低于滑动条高度的帧会被抬到该高度；关闭则完全保留镜头编辑位置。",
+        "camera_height": "镜头高度偏移（米）",
+        "camera_height_tip": "整体上下平移镜头（视点与目标同步移动，不改变画面角度）；用于把导出对齐到游戏地面。",
         "camera_min_y_tip": "低于该高度的帧会被抬到该高度；填 0 则不抬。",
         "audio_src": "源音频",
         "audio_out": "输出（.ogg）",
@@ -474,7 +499,6 @@ TEXTS = {
         "audio_channels": "声道",
         "audio_quality": "质量 (-q)",
         "audio_normalize": "峰值归一化",
-        "audio_quality_tip": "Vorbis 品质 -q（0〜10，越高越好也越大）。这里 6 已足够透明；游戏只要求是 44100 Hz 的 Vorbis。",
         "audio_normalize_tip": "输出峰值目标；0.95 安全，填 0 不动音量。",
         "audio_overwrite": "允许覆盖已存在的文件",
         "face_panel": "导出表情",
@@ -488,23 +512,26 @@ TEXTS = {
             "把哪些 morph 轨道变成 MOUTH_ANIM / EXPRESSION 指令，就选那段舞蹈的 .vmd。只在取消勾选“以导入动作 "
             ".vmd 为来源”时使用；它无需载入场景，也不会被改动。"
         ),
-        "face_base": "作为基础的 PV 脚本（.dsc）",
         "face_out": "要写出的 PV 脚本（.dsc）",
         "face_menu": "表情导出选项",
         "face_code": "槽表所属角色",
-        "face_code_tip": (
-            "按哪个角色的槽表查询 morph 名（MIK 初音、LEN 巡、LUK 镜、RIN 凛、KAI kaito、NER 鸣、HAK "
-            "meiko、SAK 始音、APO、WAN、GIR、MON）。要和谱面角色一致；表不对会大量名字查不到，全落进待填清单。"
-        ),
         "face_chara": "脚本里的角色槽位",
         "face_replace": "替换脚本自带的表情流",
         "face_solver": "序列模型",
         "face_approx": "使用近似映射",
         "face_gap": "口型指令最小间隔（毫秒）",
+        "face_gap_tip": "间隔小于该值的口型指令会被抽稀，保证引擎能读出清晰音节；填 0 保留全部指令。",
+        "face_auto_blink": "自动眨眼（用游戏自带的）",
+        "face_auto_blink_tip": "勾选后由引擎自己眨眼，不跟动作走：脚本会写入 AUTO_BLINK(0, 1) 与中性表情 "
+                               "EXPRESSION(0, 21, 100, 0)（没有这条表情自动眨眼不会生效），vmd 的 まばたき "
+                               "曲线被忽略。不勾选（默认）则不写 AUTO_BLINK，改用动作自带的 まばたき 驱动眼睑："
+                               "完全闭合时写 EXPRESSION(0, 22, 100, 1000)，离开该值时写 EXPRESSION(0, 21, 100, 0)。"
+                               "只有完全闭合才算眨眼。",
         "face_replace_tip": "先删掉脚本自带的口型再写我们的，避免两张嘴重叠。",
         "limb_clamp": "钳制够不到的手脚目标",
         "limb_clamp_tip": "针对把手臂或腿拉得超过关节长度的动作：沿原方向把手/脚目标收回到肢长以内，避免引擎把肘或膝锁直。默认关闭，开启也不会改变已验收的导出。",
         "face_done": "%s：口型 %d 条、表情 %d 条，共 %d 条记录 / %d 帧，替换掉 %s",
+        "face_blink_done": "眨眼：%s",
         "camera_overwrite": "允许覆盖已有文件",
         "mot_overwrite": "允许覆盖已有的动作文件",
         "camera_menu": "镜头导出选项",
@@ -642,6 +669,8 @@ TEXTS = {
         "task_audio": "导出音频",
         "task_face": "导出表情",
         "fetch_ffmpeg_tip": "将官方固定版（约 104 MB）下载到插件目录；若 PATH 或 $MMD2DIVA_FFMPEG 已有 ffmpeg，仍优先使用。",
+        "ffmpeg_path": "FFmpeg 程序（可选）",
+        "ffmpeg_path_tip": "留空则自动查找：环境变量、PATH、插件的 bin 目录及常见安装位置；自动找不到时，在此指向你自己的 ffmpeg.exe（需包含 libvorbis）。",
         "prepare": "准备",
         "read": "读取",
         "parse": "解析",
@@ -717,13 +746,21 @@ def default_dir():
 # cached for the session and invalidated only by events that can change it: the fetch step, and
 # - cheaply - never the panel draw.  An unprobed state draws nothing: silence beats a warning
 # line that might appear a frame late.
-_FFMPEG = {"path": "", "checked": False}
+_FFMPEG = {"path": "", "checked": False, "manual": None}
 
 
 def ffmpeg_probe(rescan=False):
-    if rescan or not _FFMPEG["checked"]:
+    manual = ""
+    try:
+        manual = bpy.path.abspath(bpy.context.scene.diva_ffmpeg_path)
+    except (AttributeError, RuntimeError):
+        manual = ""                       # no scene yet (startup) - probe without it
+    if rescan or not _FFMPEG["checked"] or manual != _FFMPEG["manual"]:
+        # a retyped path is a decision made after the last probe: it must re-probe
         from . import audio_ogg
-        _FFMPEG["path"] = audio_ogg.find_ffmpeg(required=False) or ""
+        found = audio_ogg.find_ffmpeg(required=False, extra_paths=[manual] if manual else ())
+        _FFMPEG["path"] = found or ""
+        _FFMPEG["manual"] = manual
         _FFMPEG["checked"] = True
     return _FFMPEG["path"]
 
@@ -760,10 +797,16 @@ def find_rom_root(base, override=""):
     outright.  Nothing found is not an error: a normal install keeps those tables inside
     `diva_main.cpk`, so "" is returned and `morph_core` reads the slot table that ships with the
     add-on instead - and the report line says which of the two was used.
+
+    `base` may be None - the generated-scaffold mode has no borrowed base - in which case the
+    motion file's own folder is climbed instead, because a mod's `.vmd` and its `.dsc` usually
+    live in the same tree.
     """
     # exactly the paths the caller rebuilds from the returned root - a directory that merely has a
     # `rom/` of its own is not a rom root, and accepting one hands back a path that then fails to load
     tables = ("main/rom/rob/rob_mot_tbl.bin", "main/rom_switch/rom/rob/rob_mot_tbl.bin")
+    if not base:
+        return ""
     here = os.path.normpath(os.path.abspath(base)).replace("\\", "/")
     candidates = [override] if override else []
     for _step in range(9):
@@ -964,7 +1007,12 @@ class DIVA_PV_OT_camera(tb.TaskOperator, ChooserDefaults, ExportHelper):
         relabel()   # open the dialog without the sidebar having drawn and these are still current
         scene = context.scene
         layout = self.layout
-        layout.prop(scene, "diva_camera_min_y")
+        layout.prop(scene, "diva_cam_height", slider=True)
+        row = layout.row(align=True)
+        row.prop(scene, "diva_camera_min_y_on", text=L("camera_min_y_on"))
+        col = row.column()
+        col.enabled = scene.diva_camera_min_y_on
+        col.prop(scene, "diva_camera_min_y", slider=True)
         layout.prop(scene, "diva_camera_overwrite")
 
     def task_name(self):
@@ -984,7 +1032,9 @@ class DIVA_PV_OT_camera(tb.TaskOperator, ChooserDefaults, ExportHelper):
             raise RuntimeError(L("exists") % (out,))
         return task_ops.CameraExportOperation(
             context, options={"src": src, "filepath": out,
-                              "min_y": scene.diva_camera_min_y or None})
+                              "min_y": scene.diva_camera_min_y if scene.diva_camera_min_y_on
+                              else None,
+                              "y_offset": scene.diva_cam_height or None})
 
     def task_finish(self, context, task, operation):
         from . import task_ops
@@ -1057,6 +1107,9 @@ class DIVA_PV_OT_audio(tb.TaskOperator, ChooserDefaults, ExportHelper):
                               # the knob is ranged, so the value is taken as given
                               "quality": float(scene.diva_audio_quality),
                               "normalize": scene.diva_audio_normalize or None,
+                              # the probed binary, manual path included: the encode uses exactly
+                              # what the panel's warning logic found, no second opinion
+                              "ffmpeg": ffmpeg_probe() or None,
                               "overwrite": scene.diva_audio_overwrite})
 
     def task_finish(self, context, task, operation):
@@ -1079,21 +1132,24 @@ class DIVA_PV_OT_audio(tb.TaskOperator, ChooserDefaults, ExportHelper):
 
 class DIVA_PV_OT_face(tb.TaskOperator, ChooserDefaults, ExportHelper):
 
-    """Pick the PV script to write: the panel's vmd morphs as MOUTH_ANIM / EXPRESSION cues.
+    """Pick the PV script to write: the panel's vmd mouth morphs as MOUTH_ANIM cues, plus the blink.
 
-    The work is `task_ops.FaceExportOperation`.  Expression and mouth behaviour is not touched: the
-    operation calls the same `morph_core.match` and `face_core.export_face` every other path uses,
-    with the same arguments.
+    The work is `task_ops.FaceExportOperation`.  The decision layer is not touched: the operation
+    calls the same `morph_core.match` and `face_core.export_face` every other path uses, with the
+    same arguments.
     """
 
-    source_prop = "diva_face_base"
+    source_prop = "diva_face_vmd"
     fallback_stem = "pv_script"
     out_suffix = ".face"
 
     bl_idname = "diva_pv.face_export"
-    bl_label = "Export expressions"
-    bl_description = ("Choose the .dsc to write: the dance .vmd's expressions spliced into the PV "
-                      "script picked on the panel")
+    bl_label = "Export expressions (.dsc)"
+    bl_description = ("Choose the .dsc to write: the dance .vmd's mouth morphs as MOUTH_ANIM cues on "
+                      "the motion's own clock, with the eyelids driven either by the game's own "
+                      "automatic blink or by the dance's まばたき curve. The scaffold the splice "
+                      "reads from is generated beside the output and removed on publish, so one "
+                      ".dsc lands where the dialog points")
     bl_options = {'PRESET', 'BLOCKING'}
     filename_ext = ".dsc"
 
@@ -1106,12 +1162,13 @@ class DIVA_PV_OT_face(tb.TaskOperator, ChooserDefaults, ExportHelper):
         layout = self.layout
         layout.prop(scene, "diva_face_code")
         layout.prop(scene, "diva_face_chara")
-        layout.prop(scene, "diva_face_replace")
-        layout.prop(scene, "diva_face_solver")
-        layout.prop(scene, "diva_face_approx")
-        layout.prop(scene, "diva_face_gap")
+        layout.prop(scene, "diva_face_audit")
         layout.prop(scene, "diva_morph_alias")
         layout.prop(scene, "diva_face_overwrite")
+        # No base-script row: the exporter generates the scaffold, so the face stream stands on
+        # the motion's own clock with no borrowed timeline to contradict it.  No transplant row
+        # either: the LOOK_ANIM 12/13 encoding it wrote is not in the shipping data and was the
+        # confirmed cause of a stuck gaze, so the exporter refuses it outright.
         # No dance-length row: the cues are placed on the base script's own timeline, whose length the
         # script already states (export_face derives it from its last TIME).  The .vmd is 30 fps and
         # the export is 60 fps for both motion and camera, so a length typed here could not be honest.
@@ -1127,43 +1184,71 @@ class DIVA_PV_OT_face(tb.TaskOperator, ChooserDefaults, ExportHelper):
         scene = context.scene
         from_motion = bool(scene.diva_face_from_motion)
         src = scene_path(scene, "diva_vmd_motion" if from_motion else "diva_face_vmd")
-        base = scene_path(scene, "diva_face_base")
         if not os.path.isfile(src):
             raise RuntimeError(L("need_import_first") if from_motion
                                else L("need_file") % L("face_vmd"))
-        if not os.path.isfile(base):
-            raise RuntimeError(L("need_file") % L("face_base"))
+        # No base script: the exporter generates a minimal shipping-shaped scaffold beside the
+        # output, so the face stream stands on the motion's own clock with no borrowed camera,
+        # stage or lyric timeline to contradict it.  The rom root comes from the panel field or
+        # the packaged tables, as the report states.
         out = bpy.path.abspath(self.filepath)
         if not out.lower().endswith(".dsc"):
             out += ".dsc"
         if os.path.exists(out) and not scene.diva_face_overwrite:
             raise RuntimeError(L("exists") % out)
+        # The morph audit is published next to the script, always: it is the record of what was
+        # measured, what was decided and what could not be transferred, and a report nobody can
+        # find is a report nobody reads.  `diva_face_audit` turns it off for a caller who does not
+        # want the file; the counters are printed either way.
+        audit_path = None
+        if getattr(scene, "diva_face_audit", True):
+            audit_path = os.path.splitext(out)[0] + ".morph_audit.json"
         return task_ops.FaceExportOperation(
             context, options={
-                "src": src, "base": base, "filepath": out,
+                "src": src, "base": "", "filepath": out,
                 "code": (scene.diva_face_code or morph_core.CHARA).upper()[:3],
                 "alias": bpy.path.abspath(scene_path(scene, "diva_morph_alias")) or None,
-                "rom_root": find_rom_root(base, scene_path(scene, "diva_morph_rom_root")),
+                "rom_root": find_rom_root(None, scene_path(scene, "diva_morph_rom_root")),
                 "chara": scene.diva_face_chara,
-                "replace": scene.diva_face_replace,
+                "replace": True,
                 "overwrite": scene.diva_face_overwrite,
-                "min_gap_ms": scene.diva_face_gap,
-                "solver": scene.diva_face_solver,
-                "approx": scene.diva_face_approx})
+                "audit_path": audit_path})
 
     def task_finish(self, context, task, operation):
-        from . import morph_core, task_ops
+        from . import face_core, morph_core, task_ops
         task_ops.log_benchmark(operation)
         stats, result = operation.stats, operation.result
         self.report({'INFO'}, L("face_root") % (operation.rom_root or morph_core.which_slot_source()))
+        if stats.get("script_format_note"):
+            # a note, not a refusal (PLUS-era official scripts pair with an older pv_db
+            # declaration all the time) - but the user deserves to see it once
+            self.report({'WARNING'}, L("face_format_note") % stats["script_format_note"])
         for line in morph_core.report(result).splitlines():
             print("Face export: %s" % line)
-        summary = ("Face export: %s -> %d records, %d mouth + %d expression cues at "
-                   "%.0f/min, %d bare TIME, %d cue(s) dropped past PV_END, %d thinned, "
-                   "hold %d, validated against every shipping-script rule")
-        print(summary % (os.path.basename(stats["out"]), stats["records"], stats["mouth"],
-                         stats["expression"], stats["cues_per_minute"], stats["bare_time"],
-                         stats["dropped_after_pv_end"], stats["thinned"], stats["hold"]))
+        print(face_core.face_report(stats))
+        # The morph audit's counters, so the console always states the coverage even when the JSON
+        # file is turned off.  `silent drops 0` is a checked claim, not a slogan: `MorphAudit.verify`
+        # refuses a report that would omit or double-count a morph the motion animates.
+        audit = operation.audit or {}
+        if audit.get("error"):
+            self.report({'WARNING'}, "morph audit failed: %s" % audit["error"])
+        else:
+            cov = audit.get("coverage") or {}
+            print("Face export: morph audit %d source morph(s) / %d keyframe(s); mapped %d "
+                  "(exact %d, near-exact %d, semantic %d, geometric %d), approximate %d, "
+                  "unsupported %d, no source definition %d, invalid %d; lane %d; "
+                  "SILENT DROPS %d"
+                  % (cov.get("total_source_morphs", 0), cov.get("total_keyframes", 0),
+                     cov.get("mapped_morphs", 0), cov.get("exact_mapped", 0),
+                     cov.get("near_exact_mapped", 0), cov.get("semantic_mapped", 0),
+                     cov.get("geometric_mapped", 0), cov.get("approximate_mapped", 0),
+                     cov.get("unsupported_target", 0), cov.get("missing_pmx_definition", 0),
+                     cov.get("invalid_source", 0), cov.get("lane_morphs", 0),
+                     cov.get("silent_drops", 0)))
+            if not (audit.get("sources", {}).get("model") or {}).get("path"):
+                self.report({'INFO'},
+                            "morph audit: no source PMX, so geometry equivalence is NOT VERIFIED - "
+                            "pick the dance's own model to enable effect measurement")
         unresolved = len(result["ambiguous"]) + len(result["unmatched"])
         wl = None
         if unresolved:
@@ -1174,6 +1259,17 @@ class DIVA_PV_OT_face(tb.TaskOperator, ChooserDefaults, ExportHelper):
                                                stats["expression"], stats["records"],
                                                stats["frames"],
                                                stats["replaced_base_face"] or "{}"))
+        self.report({'INFO'}, L("face_blink_done")
+                    % ("%d cue(s)" % stats.get("blink_cues", 0),))
+        info = stats.get("expression_info")
+        if info:
+            self.report({'INFO'}, "expression rules: %s -> %d cue(s), faces %s"
+                        % (os.path.basename(info["rules_file"]), info["emitted"],
+                           info["faces_used"]))
+            if info["missing_morphs"]:
+                self.report({'INFO'},
+                            "expression rules: this .vmd has none of %s"
+                            % ", ".join(info["missing_morphs"]))
         self.report({'INFO'}, L("morph_done") % (len(result["matched"]), len(result["ambiguous"]),
                                                 len(result["unmatched"]),
                                                 os.path.basename(wl) if wl else "-"))
@@ -1375,7 +1471,6 @@ class DIVA_PV_PT_face(bpy.types.Panel):
         col.prop(scene, "diva_face_from_motion", text=L("face_from_motion"))
         if not scene.diva_face_from_motion:
             col.prop(scene, "diva_face_vmd", text=L("face_vmd"))
-        col.prop(scene, "diva_face_base", text=L("face_base"))
         col.operator("diva_pv.face_export", text=L("morph"), icon='EXPORT')
 
 
@@ -1408,6 +1503,7 @@ class DIVA_PV_PT_music(bpy.types.Panel):
         layout = self.layout
         col = layout.column(align=True)
         col.prop(scene, "diva_audio_src", text=L("audio_src"))
+        col.prop(scene, "diva_ffmpeg_path", text=L("ffmpeg_path"))
         col.operator("diva_pv.audio_export", text=L("audio_export"), icon='EXPORT')
         # the export below only works with a libvorbis ffmpeg; when none was probed, say so here,
         # where the user is about to click it, and offer the one-click fetch instead of an error.
@@ -1423,7 +1519,12 @@ class DIVA_PV_PT_music(bpy.types.Panel):
 SCENE_PROPS = (
     ("diva_vmd_motion", StringProperty(name="Motion .vmd", subtype='FILE_PATH')),
     ("diva_camera_vmd", StringProperty(name="Camera .vmd", subtype='FILE_PATH')),
-    ("diva_camera_min_y", FloatProperty(name="Min camera Y", default=0.0, min=0.0)),
+    ("diva_camera_min_y", FloatProperty(name="Min camera Y", default=0.0, min=0.0, soft_max=3.0)),
+    ("diva_camera_min_y_on", BoolProperty(name="Clamp to a minimum height", default=False)),
+    # lifts or lowers the whole shot (viewpoint and target together) so an export can be
+    # aligned with the game floor without touching the framing
+    ("diva_cam_height", FloatProperty(name="Camera height offset", default=0.0,
+                                      min=-5.0, max=10.0, soft_min=-2.0, soft_max=5.0)),
     ("diva_camera_overwrite", BoolProperty(name="Overwrite existing", default=False)),
     ("diva_audio_src", StringProperty(name="Source audio", subtype='FILE_PATH')),
     ("diva_audio_channels", EnumProperty(name="Channels", default='2',
@@ -1434,19 +1535,17 @@ SCENE_PROPS = (
                                          description="libvorbis VBR quality, -0.2 to 10")),
     ("diva_audio_normalize", FloatProperty(name="Normalise peak", default=0.95, min=0.0, max=1.0)),
     ("diva_audio_overwrite", BoolProperty(name="Overwrite existing", default=False)),
-    ("diva_face_base", StringProperty(name="Base PV script (.dsc)", subtype='FILE_PATH')),
+    # the manual ffmpeg pick: a browse button next to the warning line for users whose
+    # ffmpeg is neither on PATH nor fetched - and the escape hatch when a download fails
+    ("diva_ffmpeg_path", StringProperty(name="FFmpeg (optional)", subtype='FILE_PATH',
+                                        default="")),
     # where the morphs come from is a decision the user makes per export, so it is a Scene property:
     # an operator property's hover text is baked at registration and cannot follow the panel language
     ("diva_face_from_motion", BoolProperty(name="From the imported motion", default=True)),
     ("diva_face_vmd", StringProperty(name="Dance .vmd to read", subtype='FILE_PATH')),
     ("diva_face_code", StringProperty(name="Slot table of", default="MIK")),
     ("diva_face_chara", IntProperty(name="Character slot", default=0, min=0)),
-    ("diva_face_replace", BoolProperty(name="Replace face stream", default=True)),
     ("diva_face_overwrite", BoolProperty(name="Overwrite existing", default=False)),
-    ("diva_face_solver", BoolProperty(name="Sequence model", default=True)),
-    ("diva_face_approx", BoolProperty(name="Use approximations", default=True)),
-    ("diva_face_gap", FloatProperty(name="Minimum gap between mouth cues (ms)", default=0.0,
-                                    min=0.0, max=1000.0)),
     # the import dialog's "Clear the rig first" and the export dialog's Static Precision / Scale Keys
     # are Scene properties, not operator ones.  An operator property's hover text is baked when the
     # class is registered and cannot be re-translated (measured on Blender 4.5), so they live here,
@@ -1456,6 +1555,13 @@ SCENE_PROPS = (
     ("diva_mot_scale_keys", FloatProperty(name="Scale Keys", default=1.0, min=0.01)),
     ("diva_mot_overwrite", BoolProperty(name="Overwrite existing", default=False)),
     ("diva_morph_alias", StringProperty(name="Alias answers", subtype='FILE_PATH')),
+    # The dance's own PMX: the export no longer asks for it.  The geometry-measurement lane it fed
+    # is only a reporting nicety; the mapping that ships is name- and table-based either way, and
+    # the field was one more input a plain face export did not need.  morph_pipeline's sidecar
+    # search still runs for the audit's own report.
+    # Export motion writes an exp_PV*.bin beside the mot set: the game's own eye-animation
+    # carrier, which every eye-bearing PV ships and no LOOK_ANIM-using PV does.
+    ("diva_face_audit", BoolProperty(name="Write the morph audit (.json)", default=True)),
     # not drawn by any panel: leave it empty and the rom root is found from the script you
     # picked (see find_rom_root); the property stays so an unusual install can still be named
     ("diva_morph_rom_root", StringProperty(name="DIVA rom root", subtype='DIR_PATH')),
@@ -1467,27 +1573,26 @@ PROP_HINTS = {
     "diva_vmd_motion": ("motion_vmd", "motion_vmd_tip"),
     "diva_camera_vmd": ("camera_vmd", "camera_vmd_tip"),
     "diva_camera_min_y": ("camera_min_y", "camera_min_y_tip"),
+    "diva_camera_min_y_on": ("camera_min_y_on", "camera_min_y_on_tip"),
+    "diva_cam_height": ("camera_height", "camera_height_tip"),
     "diva_camera_overwrite": ("camera_overwrite", "overwrite_tip"),
     "diva_audio_src": ("audio_src", "audio_src_tip"),
     "diva_audio_channels": ("audio_channels", "audio_channels_tip"),
     "diva_audio_quality": ("audio_quality", "audio_quality_tip"),
     "diva_audio_normalize": ("audio_normalize", "audio_normalize_tip"),
     "diva_audio_overwrite": ("audio_overwrite", "overwrite_tip"),
-    "diva_face_base": ("face_base", "face_base_tip"),
+    "diva_ffmpeg_path": ("ffmpeg_path", "ffmpeg_path_tip"),
     "diva_face_from_motion": ("face_from_motion", "face_from_motion_tip"),
     "diva_face_vmd": ("face_vmd", "face_vmd_tip"),
     "diva_face_code": ("face_code", "face_code_tip"),
     "diva_face_chara": ("face_chara", "face_chara_tip"),
-    "diva_face_replace": ("face_replace", "face_replace_tip"),
     "diva_face_overwrite": ("camera_overwrite", "overwrite_tip"),
-    "diva_face_solver": ("face_solver", "face_solver_tip"),
-    "diva_face_approx": ("face_approx", "face_approx_tip"),
-    "diva_face_gap": ("face_gap", "face_gap_tip"),
     "diva_import_clear": ("clear_first", "clear_first_tip"),
     "diva_mot_decimals": ("decimals", "decimals_tip"),
     "diva_mot_scale_keys": ("scale_keys", "scale_keys_tip"),
     "diva_mot_overwrite": ("mot_overwrite", "overwrite_tip"),
     "diva_morph_alias": ("alias", "alias_tip"),
+    "diva_face_audit": ("face_audit", "face_audit_tip"),
 }
 
 def probe_dt(scene):

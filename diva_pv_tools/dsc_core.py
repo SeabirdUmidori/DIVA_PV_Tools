@@ -229,7 +229,8 @@ def attested_expression_ids():
     return set(targets()["expression_ids"])
 
 
-def validate(path, magic=None, version=None, chara_limit=None, player_end=True):
+def validate(path, magic=None, version=None, chara_limit=None, player_end=True,
+             extra_expression_ids=()):
     """Read the file back and refuse it unless every rule a shipping script obeys holds.
 
     Returns a list of human-readable problems; empty means the script is the shape the engine is
@@ -246,6 +247,13 @@ def validate(path, magic=None, version=None, chara_limit=None, player_end=True):
         replacement empties can never leave one behind;
       * MOUTH_ANIM.shape and EXPRESSION.id inside the measured sets;
       * a face cue never after PV_END: the ending has already been played by then.
+
+    ``extra_expression_ids`` admits ids this corpus measurement does not contain but that a caller
+    has established some other way.  `diva_face_targets.json` is a *measurement* - the ids a
+    shipping chart sends - and the exporter's blink ids (21 and 22) are not in it, because they were
+    verified in game instead (`face_core`'s docstring records the file they were confirmed on).
+    Keeping them here rather than folding them into the measured table means the table still says
+    exactly what was measured, and the exception is visible at the one call site that needs it.
     """
     problems = []
     try:
@@ -262,7 +270,7 @@ def validate(path, magic=None, version=None, chara_limit=None, player_end=True):
 
     times, bare, after_end, ended = [], 0, [], False
     shapes = {r for r in attested_mouth_shapes()}
-    exprs = {r for r in attested_expression_ids()}
+    exprs = {r for r in attested_expression_ids()} | {int(i) for i in extra_expression_ids}
     pos = 0
     while pos < len(recs):
         name, params = recs[pos]

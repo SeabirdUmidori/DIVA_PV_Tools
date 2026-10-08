@@ -1,35 +1,40 @@
-"""MMD VMD facial animation -> Project DIVA expression / mouth slot transfer.
+"""MMD VMD mouth animation -> Project DIVA mouth slot transfer.
 
 The whole job in one sentence: read which MMD morph names a VMD actually animates, line them up
-against the expression/mouth slots *this build of the game really ships*, match the ones we can be
-confident about, and hand the human a worklist of the rest to fill in by hand.
+against the mouth slots *this build of the game really ships*, match the ones we can be confident
+about, and hand the human a worklist of the rest to fill in by hand.
+
+**This module resolves mouth shapes.**  The exporter transplants the lip sync and the blink.  MMD
+*expression* morphs (笑い, 怒り, 涙 ...) are **no longer resolved into cues here**: the faces the
+export writes come from ``data/expression_rules.json``, which states each DIVA face as a threshold
+condition on the dance's morph weights.  The ``expression`` / ``expression_approx`` halves of
+``diva_face_alias.json`` are still shipped and still read - but only as name knowledge, because the
+morph *audit* reports against them; nothing in this module emits an ``EXPRESSION`` cue from them.
 
 Two facts shape everything below:
 
-  * The game's face is a finite, *numbered* slot list, not a set of names.  At runtime the PV script
-    fires ``MOUTH_ANIM(chara, 0, shape, weight, hold)`` and ``EXPRESSION(chara, id, intensity, -1)``.
+  * The game's mouth is a finite, *numbered* slot list, not a set of names.  At runtime the PV script
+    fires ``MOUTH_ANIM(chara, 0, shape, weight, hold)``, where ``shape`` is the mouth table's index.
     The slot -> shape/animId tables are read from ``mot_db.farc`` + ``rob_mot_tbl.bin``; the same
     parsing is reproduced here so this module is self-contained, and every name it prints is sourced
     from those files - never invented.
-  * The two commands do **not** share a numbering: mouth takes the mouth table's index, expression
-    takes the ``rob_mot_tbl`` slot (face_core's docstring has the measurements).  So the name ->
-    target tables are kept apart, ``diva_face_alias.json``'s ``mouth`` and ``expression`` halves,
-    and a name that appears in both is a build error rather than a coin toss.
+  * The mouth and the expression command do **not** share a numbering - mouth takes the mouth table's
+    index, ``EXPRESSION`` takes the ``rob_mot_tbl`` slot - which is one more reason the two are kept
+    in separate tables and only one of them is emitted.
 
 Matching runs in the order the worklist is meant to be read: exact -> shipped alias -> the user's
 own answers -> the keyword tier -> a legal DIVA fallback -> "unresolved, ask the human".  A name is
 never auto-accepted on a low-confidence resemblance: it is reported *ambiguous* with ranked
 suggestions instead.
 
-Known gap this module surfaces rather than hides: blinking (``まばたき``) has no mouth/expression
-slot to map onto.  Measured: the MIK set in ``mot_db`` contains no BLINK/MABATAKI/MABU/LID name at
-all, and DIVA blinks procedurally (``AUTO_BLINK`` / ``EYE_ANIM`` are separate commands), so
-``まばたき`` is flagged ``blink`` and reported separately.
+Not a mapping problem at all, and handled one layer down: blinking (``まばたき``) has no mouth slot.
+Measured: the MIK set in ``mot_db`` contains no BLINK/MABATAKI/MABU/LID name - so ``まばたき`` is
+flagged ``blink``, reported, and ``face_core.blink_events`` translates its curve into the blink
+``EXPRESSION`` cues (see that module).
 
 The twin failure this module also surfaces: a target whose *value* the engine has never been seen
-to accept.  ``MIK_FACE_SMILE`` is slot 29, looks like the obvious home for にっこり, and no shipping
-script sends id 29 - so it is not offered.  ``diva_face_targets.json`` holds the measured sets and
-``dsc_core.attested_*`` is the single source of truth for them.
+to accept.  A mouth index outside the measured set is not offered.  ``diva_face_targets.json`` holds
+the measured sets and ``dsc_core.attested_*`` is the single source of truth for them.
 
 No Blender import.  usage:
     python -m diva_pv_tools.morph_core names
@@ -54,13 +59,22 @@ from . import vmd_reader as vmd          # noqa: E402  (SJIS VMD reader)
 # The rom is normally split across unpacked trees; a Steam install keeps the tables inside
 # diva_main.cpk and has no loose file at all, which is why the packaged tables shipped with this
 # add-on are the normal path and these roots are only consulted when the user has an extracted
-# rom.  Set the environment variable DIVA_DATA_ROOT to the directory that contains
-# `main/rom/rob/rob_mot_tbl.bin` (a `rom_switch` sibling is probed too).
+# rom.  Set the environment variable DIVA_DATA_ROOT to the directory that contains the rom trees
+# (`main/rom/...`, `main/rom_switch/rom/...`, ...).
+#
+# The tree layout is NOT uniform and the probes below must cover both shapes: `main/rom` puts the
+# tables at `rob/`, while `main/rom_switch` adds a `rom/` level.  Probing only one shape is a
+# silent failure - `game_names()` falls back to the packaged table and the report says "packaged"
+# without saying that the user's own rom was skipped - so every layout is probed and the one that
+# answered is reported.
 DATA_ROOTS = tuple(p for p in (os.environ.get("DIVA_DATA_ROOT", ""),) if p)
-_ROB_TBL = tuple("%s/main/%s/rob/rob_mot_tbl.bin" % (r, t)
-                 for r in DATA_ROOTS for t in ("rom", "rom_switch"))
-_MOT_DB = tuple("%s/main/%s/rob/mot_db.farc" % (r, t)
-                for r in DATA_ROOTS for t in ("rom", "rom_switch"))
+_TBL_REL = ("main/rom/rob/rob_mot_tbl.bin", "main/rom_switch/rom/rob/rob_mot_tbl.bin",
+            "main/rom_ps4/rom/rob/rob_mot_tbl.bin", "main/rom_steam/rom/rob/rob_mot_tbl.bin")
+_DB_REL = ("main/rom/rob/mot_db.farc", "main/rom_switch/rom/rob/mot_db.farc",
+           "main/rom_ps4/rom/rob/mot_db.farc", "main/rom_steam/rom/mot_db.farc",
+           "main/rom_steam/rom/rob/mot_db.farc")
+_ROB_TBL = tuple(os.path.join(r, rel) for r in DATA_ROOTS for rel in _TBL_REL)
+_MOT_DB = tuple(os.path.join(r, rel) for r in DATA_ROOTS for rel in _DB_REL)
 SLOTS_JSON = os.path.join(HERE, "expression_slots.json")
 ALIAS_JSON = os.path.join(HERE, "diva_face_alias.json")
 
@@ -77,12 +91,87 @@ MOUTH_SLOTS = [0x86, 0x8C, 0x8E, 0x92, 0x90, 0x94, 0x96, 0x98, 0x84, 0x83, 0x88,
                0x93, 0x91, 0x85, 0x89, 0x8B, 0x8D, 0x95, 0x99, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8,
                0xF9, 0xFA, 0xFB, 0xFC]
 EXP_SLOTS = [0x0B, 0x0F, 0x39, 0x13, 0x17, 0x19, 0x1D, 0x21, 0x25, 0x29, 0x2D, 0x31, 0x35,
-             0x41, 0x07, 0x45, 0x49, 0x4D, 0x51, 0x55, 0x59, 0x07, 0x3D, 0x06, 0xD6, 0xD7,
-             0xD8, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD]
+             0x41, 0x07, 0x45, 0x49, 0x4D, 0x51, 0x55, 0x59, 0x07, 0x3D]
+
+# The list above stops at 22 because that is where the evidence stops.  It used to carry nine more
+# entries (0x06 and 0xD6..0xDD, all slots the name table gives no animId) - those were a *guess* at
+# the tail, and the expression probe falsified it: `EXPRESSION(0, 42)` came back as ウィンク and
+# `(0, 43)` as ウィンク右, so the engine's table is longer and is made of real faces, not of unnamed
+# slots.  The guess is therefore removed rather than kept, and what the probe actually established
+# is recorded on its own:
+#
+#   * ids 0..22 - every one read back in game as the face this list names (21 of 21 readable);
+#   * ids 42 and 43 - the per-eye winks;
+#   * ids 23..41  - exist, never observed, deliberately not guessed at.
+EXP_WINKS = {42: "MIK_FACE_WINK_L", 43: "MIK_FACE_WINK_R"}
+EXP_UNOBSERVED = (23, 41)
+
+
+def expression_id_name(idx):
+    """What `EXPRESSION(chara, idx, …)` is, as far as the game itself has been made to say.
+
+    Returns the asset name, or `None` for the ids that live in the engine's table but were never
+    observed - naming those would be inventing the very thing the probe exists to measure.
+    """
+    if idx in EXP_WINKS:
+        return EXP_WINKS[idx]
+    if 0 <= idx < len(EXP_SLOTS):
+        return None            # slot known, name comes from `game_names()`; see the caller
+    return None
+
 
 EXACT, ALIAS, APPROX, USER, KEYWORD = "exact", "alias", "approx", "user", "keyword"
 CONFIDENT = (EXACT, ALIAS, USER)
 TIER_ORDER = (EXACT, USER, ALIAS, APPROX, KEYWORD)
+
+
+# --- what a slot's name says it belongs to ------------------------------------------------
+# The game's slots fall into blocks that the *name* announces, measured from rob_mot_tbl +
+# mot_db (1097 shipping scripts and the Switch rom's own table): 132 face, 42 mouth (KUCHI),
+# 35 common, 13 other, for every performer.  Two blocks matter here and were previously invisible:
+#
+#   * `EYES_*` (0xA6..0xBF) - the gaze block.  A real, named, per-performer set of eye-direction
+#     animations (UP/DOWN/LEFT/RIGHT and the diagonals), which is where an MMD gaze morph belongs.
+#     Whether the engine reads it through EYE_ANIM or through an expression id is NOT established
+#     by the corpus (no command in it takes a slot index from this block), so the capability model
+#     reports it as available-but-encoding-unverified rather than emitting it.
+#   * `FACE_EYEBROW_UP_*` (0xEC..0xEF) - per-side raised eyebrows, added by the MEGA39's era table.
+#     No shipping script cues them either.  They are exactly what MMD's 眉上げ/上 need, and
+#     are exposed here so a mapping can point at them and be *reported* instead of guessed at.
+FEATURE_BLOCKS = ("eyes", "eyebrow")
+FEATURE_PREFIXES = {
+    "eyes": ("CMN_EYES_", "_EYES_"),
+    "eyebrow": ("_FACE_EYEBROW_",),
+}
+
+
+def feature_block(name):
+    """`'eyes'` / `'eyebrow'` / None - which feature block a slot name belongs to."""
+    for block, prefixes in FEATURE_PREFIXES.items():
+        if any(p in name for p in prefixes):
+            return block
+    return None
+
+
+def anim_family(name):
+    """The name's own block: face / mouth / eyes / eyebrow / hand / common / other.
+
+    Read from the asset name, which is the only thing the table carries.  This is a *classification
+    of names*, not a claim about behaviour; behaviour is what `diva_capability` measures.
+    """
+    if "_KUCHI_" in name:
+        return "mouth"
+    if "_FACE_EYEBROW_" in name:
+        return "eyebrow"
+    if "_EYES_" in name:
+        return "eyes"
+    if "_FACE_" in name:
+        return "face"
+    if "_HAND_" in name:
+        return "hand"
+    if name.startswith("CMN_"):
+        return "common"
+    return "other"
 
 
 class MorphSourceError(RuntimeError):
@@ -145,6 +234,21 @@ def _from_shipped(why):
                                % (why, CHARA, ", ".join(sorted(blob["characters"]))))
     game = {"_source": dict(blob.get("_source", {}), reason=why, slots_json=SLOTS_JSON)}
     game.update({k: rows[k] for k in ("mouth", "expression", "other")})
+    # The packaged file is a dump of the same tables, so the feature blocks can be rebuilt from
+    # it: `other` is deduplicated by name (that is how the dump was made) but it still contains
+    # one row per distinct name, which is enough to enumerate the EYES_* and eyebrow slots.  A
+    # slot whose name repeats at a higher index is genuinely missing from this source, and the
+    # capability model says so rather than pretending the block is complete.
+    feature = {block: [] for block in FEATURE_BLOCKS}
+    for row in game["other"]:
+        block = feature_block(row.get("name", ""))
+        if block:
+            feature[block].append(dict(row, kind="feature", category=anim_family(row["name"])))
+    for block in feature:
+        feature[block].sort(key=lambda r: r["slot"])
+    game["feature"] = feature
+    game["_source"] = dict(game["_source"],
+                           slots_named_feature={k: len(v) for k, v in feature.items()})
     return game
 
 
@@ -172,7 +276,9 @@ def game_names(refresh=False):
         return _CACHE["game"]
     tbl_path, db_path = _first_existing(_ROB_TBL), _first_existing(_MOT_DB)
     if not tbl_path or not db_path:
-        hint = _ROB_TBL[0] if _ROB_TBL else "DIVA_DATA_ROOT is not set"
+        hint = ("DIVA_DATA_ROOT is not set" if not DATA_ROOTS
+                else "DIVA_DATA_ROOT=%s has neither %s nor %s"
+                     % (", ".join(DATA_ROOTS), _TBL_REL[0], _DB_REL[1]))
         game = _from_shipped("no extracted rom here (%s)" % hint)
         _CACHE["game"] = game
         return game
@@ -213,13 +319,31 @@ def game_names(refresh=False):
             continue
         name = id2.get(anim)
         if name:
-            other.append({"name": name, "slot": slot, "idx": None, "anim": anim, "kind": "other"})
+            other.append({"name": name, "slot": slot, "idx": None, "anim": anim, "kind": "other",
+                          "category": anim_family(name)})
     other_by_name = {}
     for r in sorted(other, key=lambda r: r["slot"]):
         other_by_name.setdefault(r["name"], r)
-    game = {"mouth": mouth, "expression": expression, "other": list(other_by_name.values())}
+    # The `other` list is deduplicated by name, which hides the highest-numbered slots: nine of the
+    # ten named slots above 0x74 are repeats of MIK_FACE_RESET.  Slots a *feature* actually needs
+    # must not be lost that way, so the slots whose names carry a distinct semantic block are also
+    # exposed unabridged, keyed by block.
+    feature_slots = {block: [] for block in FEATURE_BLOCKS}
+    for slot, anim in enumerate(mik):
+        name = id2.get(anim)
+        if not name:
+            continue
+        block = feature_block(name)
+        if block:
+            feature_slots[block].append({"name": name, "slot": slot, "idx": None, "anim": anim,
+                                         "kind": "feature", "category": anim_family(name)})
+    for block in feature_slots:
+        feature_slots[block].sort(key=lambda r: r["slot"])
+    game = {"mouth": mouth, "expression": expression, "other": list(other_by_name.values()),
+            "feature": feature_slots}
     src = {"rob_mot_tbl": tbl_path, "mot_db": db_path, "slots_named_mouth": len(mouth),
-           "slots_named_expression": len(expression), "slots_named_other": len(game["other"])}
+           "slots_named_expression": len(expression), "slots_named_other": len(game["other"]),
+           "slots_named_feature": {k: len(v) for k, v in feature_slots.items()}}
     game = {"_source": src, **game}
     _CACHE["game"] = game
     return game
@@ -322,7 +446,53 @@ def junk_reason(name):
 
 
 def is_blink(name):
-    return normalize(name) in (normalize("まばたき"), normalize("瞬き"), normalize("blink"))
+    """A morph that shuts both eyelids.
+
+    Answered from the shared catalog (`mmd_morph`), which covers the half-width spellings
+    (``ｳｨﾝｸ２右``), the trailing-ordinal variants (``ウィンク２``) and the English names that a local
+    tuple of spellings kept missing.  The tuple this used to consult is kept below as
+    `_BLINK_FALLBACK` only so a future catalog failure degrades instead of raising; the catalog is
+    the source of truth because `face_core`'s eyelid lane depends on this answer, and getting it
+    wrong is what leaves an eye shut for the rest of a song.
+    """
+    try:
+        from . import mmd_morph
+        return mmd_morph.classify(name).category == "eyelid_blink"
+    except Exception:
+        return normalize(name) in (normalize("まばたき"), normalize("瞬き"), normalize("blink"))
+
+
+def is_wink(name):
+    """'left' | 'right' | None - which eyelid a wink morph closes."""
+    try:
+        from . import mmd_morph
+        category = mmd_morph.classify(name).category
+        if category == "eyelid_wink_left":
+            return "left"
+        if category == "eyelid_wink_right":
+            return "right"
+        return None
+    except Exception:
+        key = normalize(name)
+        if key in tuple(normalize(x) for x in _BLINK_FALLBACK["right"]):
+            return "right"
+        if key in tuple(normalize(x) for x in _BLINK_FALLBACK["left"]):
+            return "left"
+        return None
+
+
+# Kept only as a degraded-mode fallback for `is_blink`/`is_wink`; the catalog is authoritative.
+_BLINK_FALLBACK = {
+    "left": ("ウィンク", "ウインク", "ウィンク２", "ウインク２", "ウィンク2", "wink"),
+    "right": ("ウィンク右", "ウインク右", "ウィンク右２", "右ウィンク", "wink right", "wink_r"),
+}
+
+
+def eyelid_role(name):
+    """'both' for a blink, 'left'/'right' for a wink, None for everything else."""
+    if is_blink(name):
+        return "both"
+    return is_wink(name)
 
 
 # --- VMD side ---------------------------------------------------------------------------------
@@ -385,21 +555,18 @@ def _candidates(name, game, tbl):
 
     Two sources of candidate, both principled and neither auto-accepted:
       * romanisation overlap - a query that shares a Latin token with a slot's ASCII stem
-        (e.g. 'smile' vs MIK_FACE_LAUGH);
-      * a shipped alias key *contained* in the query - e.g. 'ウィンク右' contains the alias key
-        'ウィンク' (-> MIK_FACE_WINK_OLD), so a right wink is suggested, not assumed.
+        (e.g. 'smile' vs MIK_KUCHI_SMILE);
+      * a shipped alias key *contained* in the query - e.g. 'あ' inside 'あいうえお', so a vowel is
+        suggested, not assumed.
 
     Scoring prefers the longer overlap; at most four are returned for the human to pick from, and
-    only targets in the measured sets are offered.
+    only targets in the measured sets are offered.  **Mouth slots only**: the exporter transplants
+    the lip sync, so an expression suggestion would be advice the panel cannot act on.
     """
     key = normalize(name)
     mouth_ok = dsc.attested_mouth_shapes()
-    expr_ok = dsc.attested_expression_ids()
 
-    def usable(row):
-        return (row["idx"] in mouth_ok) if row["kind"] == "mouth" else (row["slot"] in expr_ok)
-
-    rows = [r for r in game["mouth"] + game["expression"] if usable(r)]
+    rows = [r for r in game["mouth"] if r["idx"] in mouth_ok]
     by_name = {r["name"]: r for r in rows}
     scored = {}
 
@@ -415,7 +582,7 @@ def _candidates(name, game, tbl):
         for tok in re.split(r"[^0-9a-z]+", key):
             if len(tok) >= 3 and tok in stem:
                 offer(row, 2 * len(tok))
-    for table in ("mouth", "expression", "mouth_approx", "expression_approx"):
+    for table in ("mouth", "mouth_approx"):
         for jp, an in tables()[table].items():
             if len(jp) >= 2 and jp in key and jp != key and an in by_name:
                 offer(by_name[an], 2 * len(jp))
@@ -431,26 +598,29 @@ def match(vmd_path, alias_file=None, approx=True):
 
     ``how`` is one of exact / user / alias / approx / keyword; the first three are confident and
     become cues, ``approx`` and ``keyword`` are still emitted but counted separately so the report
-    can say how much of the face is a reading rather than a translation.  Nothing that reaches the
+    can say how much of the mouth is a reading rather than a translation.  Nothing that reaches the
     *candidate* layer is auto-accepted: those rows are reported ambiguous for the human.
+
+    **Every tier here targets a mouth shape.**  The exporter transplants lip sync and the blink, and
+    nothing else: an expression morph is reported on the worklist instead of being sent as an
+    ``EXPRESSION`` cue, so the expression and expression-approximation tables are never consulted.
+    ``approx`` therefore widens the *mouth* mapping only - it turns on the shipped mouth
+    approximation table and the keyword tier.
     """
     game = game_names()
     tbl = tables()
     exact_index = {}
     attested = {}
-    for kind in ("mouth", "expression"):
-        for row in game[kind]:
-            target_ok = (row["idx"] in dsc.attested_mouth_shapes() if kind == "mouth"
-                         else row["slot"] in dsc.attested_expression_ids())
-            if not target_ok:
-                continue      # unusable: never offered as an exact match either
-            exact_index.setdefault(normalize(row["name"]), row)
-            attested[row["name"]] = row
+    for row in game["mouth"]:
+        if row["idx"] not in dsc.attested_mouth_shapes():
+            continue      # unusable: never offered as an exact match either
+        exact_index.setdefault(normalize(row["name"]), row)
+        attested[row["name"]] = row
     answers = {normalize(k): v for k, v in _load_alias_file(alias_file).items()}
     tiers = keyword_tiers()
 
     matched, unmatched, ambiguous, rows = [], [], [], []
-    skipped_junk, blink = 0, []
+    skipped_junk, blink, wink = 0, [], []
 
     def add(info, target, how, why):
         row = attested.get(target)
@@ -463,7 +633,17 @@ def match(vmd_path, alias_file=None, approx=True):
         if info["blink"]:
             blink.append(name)
             rows.append(dict(info, target=None, how="blink", kind=None,
-                             why="DIVA blinks procedurally - there is no blink slot to map to"))
+                             why="drives the eyelid through the blink EXPRESSION cues"))
+            continue
+        side = is_wink(name)
+        if side is not None:
+            # A wink is per-eye eyelid motion and DIVA's face command has no per-eye form: the
+            # blink ids shut *both* lids.  Reported, never emitted, so a wink cannot silently
+            # become a both-eyes blink.
+            wink.append((name, side))
+            rows.append(dict(info, target=None, how="wink", kind=None,
+                             why="per-eye eyelid motion, which the blink EXPRESSION cues "
+                                 "(%s) cannot express" % (side,)))
             continue
         # 1/2. exact DIVA name, or the user's own answer, or the shipped alias table.  These run
         # before the junk filter: an explicit name in a table is a statement about what the morph
@@ -476,10 +656,7 @@ def match(vmd_path, alias_file=None, approx=True):
                 add(info, row["name"], EXACT, "the morph already carries a DIVA morph name")
                 continue
             for table, tier, note in (("mouth", ALIAS, "shipped alias (mouth)"),
-                                      ("expression", ALIAS, "shipped alias (expression)"),
-                                      ("mouth_approx", APPROX, "shipped approximation (mouth)"),
-                                      ("expression_approx", APPROX,
-                                       "shipped approximation (expression)")):
+                                      ("mouth_approx", APPROX, "shipped approximation (mouth)")):
                 if not approx and tier == APPROX:
                     continue
                 target = tbl[table].get(key)
@@ -487,18 +664,13 @@ def match(vmd_path, alias_file=None, approx=True):
                     how, why = tier, note
                     break
         if target is not None:
-            row = attested.get(target) or next((r for r in game["mouth"] + game["expression"]
-                                                if r["name"] == target), None)
+            row = attested.get(target)
             if row is not None:
-                kind_ok = ((row["kind"] == "mouth" and row["idx"] in dsc.attested_mouth_shapes())
-                           or (row["kind"] == "expression"
-                               and row["slot"] in dsc.attested_expression_ids()))
-                if kind_ok:
-                    add(info, target, how, why)
-                    continue
+                add(info, target, how, why)
+                continue
             unmatched.append(name)
             rows.append(dict(info, target=target, how="rejected", kind=None,
-                             why="%s is not a target any shipping script uses" % target))
+                             why="%s is not a mouth shape any shipping script uses" % target))
             continue
         # 3. plumbing
         jr = junk_reason(name)
@@ -512,16 +684,12 @@ def match(vmd_path, alias_file=None, approx=True):
             rows.append(dict(info, target=None, how="junk", kind=None,
                              why="a single baseline key at zero weight"))
             continue
-        # 4. keyword tier: semantics, on attested targets only.  Tested against the *normalised*
-        # name, which is what makes the anchored mouth patterns ('^mouthopen$') reach
-        # 'mouth_open'; the expression patterns are substrings on purpose (see the data file).
+        # 4. keyword tier: semantics, on attested mouth shapes only.  Tested against the *normalised*
+        # name, which is what makes the anchored patterns ('^mouthopen$') reach 'mouth_open'.
         hit = None
-        for kind in ("mouth", "expression"):
-            for rx, cand in tiers[kind]:
-                if rx.search(key):
-                    hit = (cand, "keyword tier: /%s/" % rx.pattern)
-                    break
-            if hit:
+        for rx, cand in tiers["mouth"]:
+            if rx.search(key):
+                hit = (cand, "keyword tier: /%s/" % rx.pattern)
                 break
         if hit and approx:
             add(info, hit[0], KEYWORD, hit[1])
@@ -542,12 +710,14 @@ def match(vmd_path, alias_file=None, approx=True):
         "animated": sum(1 for r in rows if r["peak"]),
         "matched": len(matched), "ambiguous": len(ambiguous), "unmatched": len(unmatched),
         "junk_filtered": skipped_junk, "blink_names": blink,
+        "wink_names": [n for n, _s in wink],
         "exact": counts[EXACT], "user": counts[USER], "alias": counts[ALIAS],
         "approx": counts[APPROX], "keyword": counts[KEYWORD],
         "rejected": sum(1 for r in rows if r["how"] == "rejected"),
     }
     return {"matched": matched, "unmatched": unmatched, "ambiguous": ambiguous,
-            "rows": rows, "stats": stats, "blink": blink}
+            "rows": rows, "stats": stats, "blink": blink,
+            "wink": [n for n, _s in wink], "wink_sides": dict(wink)}
 
 
 # --- worklist (human-in-the-loop) --------------------------------------------------------------
@@ -565,11 +735,13 @@ def write_worklist(match_result, out_path):
         "# A name answered here wins over every table that ships with the add-on.",
         "#",
     ]
-    if match_result.get("blink"):
-        lines.append("# KNOWN GAP - blink has no mouth/expression slot; emitting it is new work:")
-        for b in match_result["blink"]:
-            lines.append('#   blink  "%s"   (procedural in DIVA; no MIK BLINK/MABATAKI slot exists)'
-                         % b)
+    if match_result.get("blink") or match_result.get("wink"):
+        lines.append("# EYE: blink/wink morphs need no slot - the export drives the eyelid"
+                     " channels (LOOK_ANIM 12/13) from them:")
+        for b in match_result.get("blink", []):
+            lines.append('#   blink  "%s"   (both eyelids, no worklist entry needed)' % b)
+        for w in match_result.get("wink", []):
+            lines.append('#   wink   "%s"   (one eyelid, no worklist entry needed)' % w)
         lines.append("#")
     lines.append("# ---- ambiguous: pick one of the ranked suggestions ----")
     for a in match_result["ambiguous"]:
@@ -628,7 +800,11 @@ def report(match_result):
             lines.append("  UNRESOLVED %-26s keys=%-4d target=%-22s reason=%s"
                          % (r["name"], r["keys"], r["target"] or "-", r["why"]))
     for b in match_result["blink"]:
-        lines.append("  BLINK      %-26s DIVA blinks procedurally - no slot to map it to" % b)
+        lines.append("  BLINK      %-26s drives both eyelids (LOOK_ANIM 12/13)" % b)
+    for w in match_result.get("wink", []):
+        side = match_result.get("wink_sides", {}).get(w, "left")
+        lines.append("  WINK       %-26s drives the %s eyelid (LOOK_ANIM %d)"
+                     % (w, side, 12 if side == "left" else 13))
     return "\n".join(lines)
 
 
